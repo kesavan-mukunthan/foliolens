@@ -1,0 +1,14 @@
+amfi_code,isin,option,plan,fund_name,category
+120586,INF109K016L0,growth,direct,ICICI Prudential Large Cap Fund,large_cap
+108466,INF109K01BL4,growth,regular,ICICI Prudential Large Cap Fund,large_cap
+120381,INF109K011N7,growth,direct,ICICI Prudential Midcap Fund,mid_cap
+120591,INF109K015M0,growth,direct,ICICI Prudential Smallcap Fund,small_cap
+120754,INF109K013N3,growth,direct,ICICI Prudential Short Term Fund,short_duration_debt
+120197,INF109K01Q49,growth,direct,ICICI Prudential Liquid Fund,liquid
+103340,INF109K01VQ1,growth,regular,ICICI Prudential Liquid Fund,liquid
+120679,INF109K01X16,growth,direct,ICICI Prudential Dynamic Asset Allocation Active FoF,fund_of_funds
+120334,INF109K015K4,growth,direct,ICICI Prudential Multi-Asset Fund,multi_asset
+119018,INF179K01YV8,growth,direct,HDFC Large Cap Fund,large_cap
+122639,INF879O01027,growth,direct,Parag Parikh Flexi Cap Fund,flexi_cap
+118663,INF204K01YC4,growth,direct,Nippon India Gold Savings Fund,gold_fof
+114616,INF204K01KN0,growth,regular,Nippon India Gold Savings Fund,gold_fof
