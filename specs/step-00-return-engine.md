@@ -3,11 +3,13 @@
 **Status:** ready for build.
 **Executor:** Claude Code on Sonnet 4.6. Sub-steps 0.4–0.6 require Sonnet; 0.2 / 0.3 / 0.7 are Haiku-safe.
 **Conventions:** see `CLAUDE.md`. Do not restate or override them.
+**Architecture:** see `ARCHITECTURE.md` for the domain model. Step 0 builds its priced-instrument subset; everything else is defined-but-stubbed.
 
 ## Objective
 NAV → returns for a fixed set of known funds, validated three ways (own impl, library oracle, published factsheet figures). This is the keystone calc; everything downstream depends on it. Validate before any personal data, scaling, or cloud.
 
 ## In scope
+- **Domain model layer** — the step-0 subset of `ARCHITECTURE.md`: `Entity`, `NavSeries`, `ReturnSource` protocol + `PricedSource`, `ShareClass`/`Fund`, engine. Deferred types (`Cashflow`, `BlendSource`, `HeldSource`, `WeightPolicy`, holdings DAG) are **defined as stubs** to keep the contract stable.
 - Fetch growth-option NAV history for the reference funds via mftool.
 - Land raw daily NAV as `decimal128` parquet behind a single `DataAccess` seam.
 - Derive the month-end NAV series.
@@ -21,6 +23,7 @@ NAV → returns for a fixed set of known funds, validated three ways (own impl, 
 - GCS / Docker / GitHub Actions. **Local only.**
 - Risk metrics (Sharpe/drawdown/vol) — protocol surface only; implemented at step 2.
 - CAS parsing, cashflows, XIRR/MWR — step 1+.
+- Holdings DAG, look-through exposure, blends, weight curves, MWR — **defined as stubs only**; built in later steps (see `ARCHITECTURE.md`).
 - `pyxirr` — not used here.
 
 ## Human-supplied inputs — NOT for the executor to source
@@ -58,13 +61,13 @@ Each ≈ one 45-min session.
 - **Accept:** `test_decimal_roundtrip` green; spot-check 3 dates against AMFI published NAV.
 
 ### 0.4 Month-end base — Sonnet
-- `nav/month_end.py`: month-end = last NAV on/before calendar month-end; no look-ahead; incomplete leading/trailing months skipped, not fabricated. Daily retained.
+- Month-end logic lives on `NavSeries.month_end()` (`model/value_objects.py`): last NAV on/before calendar month-end; no look-ahead; incomplete leading/trailing months skipped, not fabricated. Daily retained.
 - **Accept:** `test_weekend_boundary` and `test_no_lookahead` green.
 
-### 0.5 ReturnSource + engine — Sonnet
-- `returns/return_source.py`: `ReturnSource` protocol (`value_series`, `cashflows`); risk-metric methods **declared, not implemented**.
-- `returns/engine.py`: TWR; absolute (<1Y) / CAGR (≥1Y) under the SEBI rule; `years = actual_days/365`; `Decimal` throughout, float only at the library boundary.
-- **Accept:** invariant tests green — SEBI both directions, chaining-consistency, TWR == point-to-point on a cashflow-free series.
+### 0.5 Domain model + engine — Sonnet
+- `model/` (per `ARCHITECTURE.md`): `Entity`, value objects (`NavSeries`, `ReturnSeries`, `ReturnResult`, `Cashflow`), `ReturnSource` protocol + `PricedSource`; `ShareClass`/`Fund` concrete (Fund prices via a representative ShareClass). Stub `BlendSource`, `HeldSource`, `WeightPolicy`, holdings/`Cash` — defined, no logic. Risk-metric methods declared, not implemented.
+- `returns/engine.py`: `period_return(source, period, as_of)` — TWR; absolute (<1Y) / CAGR (≥1Y) under the SEBI rule; `years = actual_days/365`; `Decimal` throughout, float only at the library boundary. One function, every source type.
+- **Accept:** invariant tests green — SEBI both directions, chaining-consistency, TWR == point-to-point on a cashflow-free series; `ShareClass` satisfies `ReturnSource` (mypy).
 
 ### 0.6 Three-way validation — Sonnet
 - `validation/oracle.py`: wrap ffn (primary) and empyrical-reloaded (optional); **declare periodicity explicitly**.
@@ -100,6 +103,7 @@ Each ≈ one 45-min session.
 foliolens/
   CLAUDE.md
   SCOPE.md
+  ARCHITECTURE.md
   pyproject.toml
   specs/step-00-return-engine.md
   src/foliolens/
@@ -107,10 +111,15 @@ foliolens/
     ingest/
       mftool_client.py        # all mftool calls isolated here
       land.py                 # raw NAV -> decimal128 parquet
-    nav/month_end.py
+    model/
+      entity.py               # Entity contract
+      value_objects.py        # NavSeries (+ month_end), ReturnSeries, ReturnResult, Cashflow
+      sources.py              # ReturnSource protocol; PricedSource; HeldSource/BlendSource (stubs)
+      weights.py              # WeightPolicy: Fixed/Drift/PIT (stubs)
+      entities.py             # ShareClass, Fund (concrete); Stock/Portfolio/Benchmark/Cash (stubs)
+      holdings.py             # Holding edge + DAG resolve (stub)
     returns/
-      return_source.py        # ReturnSource protocol
-      engine.py               # TWR, absolute/CAGR, SEBI rule
+      engine.py               # period_return: TWR, absolute/CAGR, SEBI rule
     validation/
       oracle.py               # ffn / empyrical-reloaded, periodicity declared
       reconcile.py            # three-way compare, fixed tolerances, fail loud
