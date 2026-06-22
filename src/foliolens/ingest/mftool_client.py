@@ -19,7 +19,7 @@ from __future__ import annotations
 import datetime
 from dataclasses import dataclass
 from decimal import Decimal
-from typing import cast
+from typing import Any, cast
 
 from mftool import Mftool  # isolated here; no other module imports mftool
 
@@ -33,16 +33,16 @@ class NavRecord:
     nav: Decimal
 
 
-def fetch_nav_history(amfi_code: str) -> dict | None:
+def fetch_nav_history(amfi_code: str) -> dict[str, Any] | None:
     """Call mftool and return its raw response dict, or None if not found.
 
     This is the only function in the codebase that instantiates Mftool.
     """
     mf = Mftool()
-    return cast(dict | None, mf.get_scheme_historical_nav(str(amfi_code)))
+    return cast(dict[str, Any] | None, mf.get_scheme_historical_nav(str(amfi_code)))
 
 
-def normalise(amfi_code: str, raw: dict) -> list[NavRecord]:
+def normalise(amfi_code: str, raw: dict[str, Any]) -> list[NavRecord]:
     """Convert a raw mftool response dict to a sorted, de-duplicated NavRecord list.
 
     Pure function — no network calls. Safe to call in unit tests with

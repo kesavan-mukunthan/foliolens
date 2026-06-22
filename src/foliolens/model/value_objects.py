@@ -5,11 +5,10 @@ Invariants are enforced on construction; callers never re-check them.
 """
 from __future__ import annotations
 
-import calendar as _cal
+from collections.abc import Iterable
 from dataclasses import dataclass
 from datetime import date
 from decimal import Decimal
-from typing import Iterable
 
 
 def _build_nav_data(

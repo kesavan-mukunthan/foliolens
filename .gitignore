@@ -4,3 +4,9 @@ __pycache__/
 data/raw/
 outputs/
 *.duckdb
+.pytest_cache/
+.mypy_cache/
+.ruff_cache/
+.env
+.DS_Store
+.vscode/

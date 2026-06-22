@@ -1,14 +1,17 @@
 """Entity protocol and concrete entity types.
 
-Entity — structural protocol: id, source, benchmark, holdings, returns.
+Entity — read-only structural protocol: id, source, benchmark, holdings, returns.
+All members are @property so that frozen-dataclass fields and computed properties
+both satisfy it without a read-write attribute mismatch.
+
 Concrete (step 0): ShareClass (leaf, priced), Fund (prices via a representative ShareClass).
 Stubs (step 1+): Stock, Portfolio, Benchmark, Cash.
 
-No I/O here. All types are frozen dataclasses or plain stubs.
+No I/O here. All concrete types are frozen dataclasses.
 """
 from __future__ import annotations
 
-from dataclasses import dataclass, field
+from dataclasses import dataclass
 from decimal import Decimal
 from typing import Protocol
 
@@ -18,12 +21,19 @@ from .value_objects import Cashflow, NavSeries, ReturnSeries
 
 
 class Entity(Protocol):
-    """Structural protocol: everything investable exposes a return series."""
+    """Read-only structural protocol: everything investable exposes a return series."""
 
-    id: str
-    source: ReturnSource
-    benchmark: Entity | None
-    holdings: tuple[Holding, ...]
+    @property
+    def id(self) -> str: ...
+
+    @property
+    def source(self) -> ReturnSource: ...
+
+    @property
+    def benchmark(self) -> Entity | None: ...
+
+    @property
+    def holdings(self) -> tuple[Holding, ...]: ...
 
     @property
     def returns(self) -> ReturnSeries: ...
@@ -44,7 +54,7 @@ class ShareClass:
     option: str  # "growth" | "idcw"
     source: PricedSource
     benchmark: Entity | None = None
-    holdings: tuple[Holding, ...] = field(default_factory=tuple)
+    holdings: tuple[Holding, ...] = ()
 
     # --- ReturnSource protocol surface ---
 
@@ -77,13 +87,14 @@ class Fund:
     """Strategy entity; groups share classes + benchmark.
 
     Prices via a representative ShareClass NAV — never via holdings.
+    source is a computed property to match Entity's read-only @property protocol.
     """
 
     id: str
     name: str
     representative: ShareClass
     benchmark: Entity | None = None
-    holdings: tuple[Holding, ...] = field(default_factory=tuple)
+    holdings: tuple[Holding, ...] = ()
 
     @property
     def source(self) -> PricedSource:

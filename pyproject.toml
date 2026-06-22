@@ -1,7 +1,7 @@
 [project]
 name = "foliolens"
 version = "0.0.1"
-requires-python = ">=3.11"
+requires-python = ">=3.12"
 dependencies = [
     "mftool",
     "duckdb",
@@ -10,7 +10,6 @@ dependencies = [
     "ffn",
     "empyrical-reloaded",
     "xlsxwriter",
-    "pytest",
 ]
 
 [build-system]
@@ -26,12 +25,11 @@ testpaths = ["tests"]
 [tool.mypy]
 python_version = "3.12"
 mypy_path = "src"
-disallow_untyped_defs = true
+strict = true
 ignore_missing_imports = true
-warn_return_any = true
-warn_unused_ignores = true
 
 [dependency-groups]
 dev = [
     "mypy>=2.1.0",
+    "pytest>=9.0",
 ]
