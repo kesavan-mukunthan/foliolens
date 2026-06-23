@@ -17,7 +17,7 @@ from decimal import Decimal
 
 import pytest
 
-from foliolens.model.entities import Fund, ShareClass
+from foliolens.model.investments import Fund, ShareClass
 from foliolens.model.sources import PricedSource, ReturnSource
 from foliolens.model.value_objects import NavSeries
 

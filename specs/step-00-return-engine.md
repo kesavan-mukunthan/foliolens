@@ -9,7 +9,7 @@
 NAV → returns for a fixed set of known funds, validated three ways (own impl, library oracle, published factsheet figures). This is the keystone calc; everything downstream depends on it. Validate before any personal data, scaling, or cloud.
 
 ## In scope
-- **Domain model layer** — the step-0 subset of `ARCHITECTURE.md`: `Entity`, `NavSeries`, `ReturnSource` protocol + `PricedSource`, `ShareClass`/`Fund`, engine. Deferred types (`Cashflow`, `BlendSource`, `HeldSource`, `WeightPolicy`, holdings DAG) are **defined as stubs** to keep the contract stable.
+- **Domain model layer** — the step-0 subset of `ARCHITECTURE.md`: `Investment`, `NavSeries`, `ReturnSource` protocol + `PricedSource`, `ShareClass`/`Fund`, engine. Deferred types (`Cashflow`, `BlendSource`, `HeldSource`, `WeightPolicy`, holdings DAG) are **defined as stubs** to keep the contract stable.
 - Fetch growth-option NAV history for the reference funds via mftool.
 - Land raw daily NAV as `decimal128` parquet behind a single `DataAccess` seam.
 - Derive the month-end NAV series.
@@ -65,7 +65,7 @@ Each ≈ one 45-min session.
 - **Accept:** `test_weekend_boundary` and `test_no_lookahead` green.
 
 ### 0.5 Domain model + engine — Sonnet
-- `model/` (per `ARCHITECTURE.md`): `Entity`, value objects (`NavSeries`, `ReturnSeries`, `ReturnResult`, `Cashflow`), `ReturnSource` protocol + `PricedSource`; `ShareClass`/`Fund` concrete (Fund prices via a representative ShareClass). Stub `BlendSource`, `HeldSource`, `WeightPolicy`, holdings/`Cash` — defined, no logic. Risk-metric methods declared, not implemented.
+- `model/` (per `ARCHITECTURE.md`): `Investment`, value objects (`NavSeries`, `ReturnSeries`, `ReturnResult`, `Cashflow`), `ReturnSource` protocol + `PricedSource`; `ShareClass`/`Fund` concrete (Fund prices via a representative ShareClass). Stub `BlendSource`, `HeldSource`, `WeightPolicy`, holdings/`Cash` — defined, no logic. Risk-metric methods declared, not implemented.
 - `returns/engine.py`: `period_return(source, period, as_of)` — TWR; absolute (<1Y) / CAGR (≥1Y) under the SEBI rule; `years = actual_days/365`; `Decimal` throughout, float only at the library boundary. One function, every source type.
 - **Accept:** invariant tests green — SEBI both directions, chaining-consistency, TWR == point-to-point on a cashflow-free series; `ShareClass` satisfies `ReturnSource` (mypy).
 
@@ -112,11 +112,10 @@ foliolens/
       mftool_client.py        # all mftool calls isolated here
       land.py                 # raw NAV -> decimal128 parquet
     model/
-      entity.py               # Entity contract
+      investments.py          # Investment protocol + ShareClass, Fund (concrete); Stock/Portfolio/Benchmark/Cash (stubs)
       value_objects.py        # NavSeries (+ month_end), ReturnSeries, ReturnResult, Cashflow
       sources.py              # ReturnSource protocol; PricedSource; HeldSource/BlendSource (stubs)
       weights.py              # WeightPolicy: Fixed/Drift/PIT (stubs)
-      entities.py             # ShareClass, Fund (concrete); Stock/Portfolio/Benchmark/Cash (stubs)
       holdings.py             # Holding edge + DAG resolve (stub)
     returns/
       engine.py               # period_return: TWR, absolute/CAGR, SEBI rule

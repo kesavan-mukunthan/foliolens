@@ -1,4 +1,4 @@
-"""Weight policies for blend-based entities.
+"""Weight policies for blend-based investments.
 
 WeightPolicy base + Fixed/Drift/PIT stubs — implemented at step 2+.
 Fixed = constant rebalanced weights; Drift = buy-and-hold; PIT = actual disclosures.

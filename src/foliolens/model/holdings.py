@@ -1,6 +1,6 @@
 """Holdings edge dataclass and DAG resolver stub.
 
-Holding is a weighted, point-in-time edge in the entity DAG.
+Holding is a weighted, point-in-time edge in the investment DAG.
 resolve_holdings is implemented at step 1+; defined here to keep the contract stable.
 """
 from __future__ import annotations
@@ -21,11 +21,11 @@ class Holding:
 
 
 def resolve_holdings(
-    entity_id: str,
+    investment_id: str,
     as_of: date,
     edges: tuple[Holding, ...],
 ) -> tuple[tuple[str, Decimal], ...]:
-    """Resolve direct children of entity_id at as_of from the edge store.
+    """Resolve direct children of investment_id at as_of from the edge store.
 
     Returns (child_id, weight) pairs. Stub — implemented at step 1+.
     """

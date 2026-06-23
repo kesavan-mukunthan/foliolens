@@ -1,12 +1,12 @@
 """FolioLens domain model — step-0 subset."""
-from .entities import Benchmark, Cash, Entity, Fund, Portfolio, ShareClass, Stock
+from .investments import Benchmark, Cash, Fund, Investment, Portfolio, ShareClass, Stock
 from .holdings import Holding, resolve_holdings
 from .sources import BlendSource, HeldSource, PricedSource, ReturnSource
 from .value_objects import Cashflow, NavSeries, ReturnResult, ReturnSeries
 from .weights import Drift, Fixed, PIT, WeightPolicy
 
 __all__ = [
-    "Entity",
+    "Investment",
     "ShareClass",
     "Fund",
     "Stock",

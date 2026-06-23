@@ -1,6 +1,6 @@
-"""Entity protocol and concrete entity types.
+"""Investment protocol and concrete investment types.
 
-Entity — read-only structural protocol: id, source, benchmark, holdings, returns.
+Investment — read-only structural protocol: id, source, benchmark, holdings, returns.
 All members are @property so that frozen-dataclass fields and computed properties
 both satisfy it without a read-write attribute mismatch.
 
@@ -20,7 +20,7 @@ from .sources import PricedSource, ReturnSource
 from .value_objects import Cashflow, NavSeries, ReturnSeries
 
 
-class Entity(Protocol):
+class Investment(Protocol):
     """Read-only structural protocol: everything investable exposes a return series."""
 
     @property
@@ -30,7 +30,7 @@ class Entity(Protocol):
     def source(self) -> ReturnSource: ...
 
     @property
-    def benchmark(self) -> Entity | None: ...
+    def benchmark(self) -> Investment | None: ...
 
     @property
     def holdings(self) -> tuple[Holding, ...]: ...
@@ -43,7 +43,7 @@ class Entity(Protocol):
 class ShareClass:
     """One AMFI scheme code — the true priced unit (isin, plan, option).
 
-    Satisfies both Entity and ReturnSource protocols.
+    Satisfies both Investment and ReturnSource protocols.
     Returns are computed by the engine (step 0.5); declared here, not implemented.
     """
 
@@ -53,7 +53,7 @@ class ShareClass:
     plan: str    # "direct" | "regular"
     option: str  # "growth" | "idcw"
     source: PricedSource
-    benchmark: Entity | None = None
+    benchmark: Investment | None = None
     holdings: tuple[Holding, ...] = ()
 
     # --- ReturnSource protocol surface ---
@@ -75,7 +75,7 @@ class ShareClass:
     def volatility(self) -> Decimal:
         raise NotImplementedError
 
-    # --- Entity protocol surface ---
+    # --- Investment protocol surface ---
 
     @property
     def returns(self) -> ReturnSeries:
@@ -84,16 +84,16 @@ class ShareClass:
 
 @dataclass(frozen=True)
 class Fund:
-    """Strategy entity; groups share classes + benchmark.
+    """Strategy investment; groups share classes + benchmark.
 
     Prices via a representative ShareClass NAV — never via holdings.
-    source is a computed property to match Entity's read-only @property protocol.
+    source is a computed property to match Investment's read-only @property protocol.
     """
 
     id: str
     name: str
     representative: ShareClass
-    benchmark: Entity | None = None
+    benchmark: Investment | None = None
     holdings: tuple[Holding, ...] = ()
 
     @property
@@ -128,14 +128,14 @@ class Fund:
 
 
 class Stock:
-    """Stub: leaf entity priced via TRI. Implemented at step 3+."""
+    """Stub: leaf investment priced via TRI. Implemented at step 3+."""
 
     def __init__(self) -> None:
         raise NotImplementedError
 
 
 class Portfolio:
-    """Stub: composite entity (BlendSource or HeldSource). Implemented at step 1+."""
+    """Stub: composite investment (BlendSource or HeldSource). Implemented at step 1+."""
 
     def __init__(self) -> None:
         raise NotImplementedError

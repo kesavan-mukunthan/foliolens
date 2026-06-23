@@ -1,7 +1,7 @@
 """Return source strategies.
 
 ReturnSource — protocol (structural interface): value_series + cashflows.
-PricedSource — concrete, for entities with an observed price/NAV series.
+PricedSource — concrete, for investments with an observed price/NAV series.
 HeldSource, BlendSource — stubs; implemented at step 1+/2+.
 
 Risk-metric methods (sharpe, max_drawdown, volatility) are protocol surface only
@@ -18,7 +18,7 @@ from .value_objects import Cashflow, NavSeries
 
 @runtime_checkable
 class ReturnSource(Protocol):
-    """Every return-producing entity exposes a price series and (optionally) cashflows."""
+    """Every return-producing investment exposes a price series and (optionally) cashflows."""
 
     @property
     def value_series(self) -> NavSeries: ...
@@ -35,7 +35,7 @@ class ReturnSource(Protocol):
 
 @dataclass(frozen=True)
 class PricedSource:
-    """Return source for entities with their own observed NAV/price series (TWR)."""
+    """Return source for investments with their own observed NAV/price series (TWR)."""
 
     nav: NavSeries
 
