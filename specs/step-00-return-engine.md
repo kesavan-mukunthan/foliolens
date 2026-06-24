@@ -84,11 +84,18 @@ Each ≈ one 45-min session.
 - Display: NAV 4dp; returns as **%** 2dp; no scientific notation.
 - **Accept:** `outputs/validation_report.xlsx` generated; re-run identical; reporter **computes nothing** (reads engine + reconcile outputs only).
 
+### 0.8 Return-series + conversion seam + monthly panel — Sonnet
+- `returns/convert.py`: `simple_return`, `to_returns(NavSeries)->ReturnSeries` (single Decimal→float cast-at-birth), `to_index(ReturnSeries)->ValueIndex`.
+- Flip `ReturnSeries` data to `float64` (retain Decimal base); add `ValueIndex` value object (float levels, base, no `amfi_code`).
+- Materialise the monthly return panel (`float64` parquet behind `DataAccess`): completed months only, immutable; per-scheme provenance hash over month-end NAV inputs + convention version; recompute-on-mismatch.
+- `period_return` / `ReturnResult` unchanged — Decimal scalar path is the regression anchor; share only `simple_return`. Do not route `period_return` through the series.
+- **Accept** (new invariants green): bridge — series-derived period return == scalar `period_return` ≤1e-6; round-trip on ratios — `to_index(to_returns(nav))` reproduces periodic ratios ≤1e-6, never NAV levels; `ReturnSeries` chaining/compounding. `test_no_float_in_returns` unchanged.
+
 ## Acceptance — the gate
 1. `pytest` all green — invariants + step-0 reconciliation.
 2. `python -m foliolens.cli` produces `outputs/validation_report.xlsx`; all funds reconcile within tolerance, or fail loud with an itemised delta.
 3. Re-running produces an identical report (determinism).
-4. No mftool call outside `mftool_client.py`; no parquet read outside `data_access.py`; no float in any stored/returned value.
+4. No mftool call outside `mftool_client.py`; no parquet read outside `data_access.py`; no float in any stored/returned *figure of record* (NAV, ReturnResult, trailing metric); analytical return series are float64 by design.
 
 ## Executor guards — because the executor is mid-tier
 - **mftool:** verify the real response shape before coding the normaliser; isolate behind the client.
@@ -114,12 +121,13 @@ foliolens/
       land.py                 # raw NAV -> decimal128 parquet
     model/
       investments.py          # Investment protocol + ShareClass, Fund (concrete); Stock/Portfolio/Benchmark/Cash (stubs)
-      value_objects.py        # NavSeries (+ month_end), ReturnSeries, ReturnResult, Cashflow
+      value_objects.py        # NavSeries (+ month_end), ReturnSeries, ReturnResult, ValueIndex, Cashflow
       sources.py              # ReturnSource protocol; PricedSource; HeldSource/BlendSource (stubs)
       weights.py              # WeightPolicy: Fixed/Drift/PIT (stubs)
       holdings.py             # Holding edge + DAG resolve (stub)
     returns/
       engine.py               # period_return: TWR, absolute/CAGR, SEBI rule
+      convert.py              # simple_return, to_returns(NavSeries->ReturnSeries), to_index(ReturnSeries->ValueIndex)
     validation/
       oracle.py               # ffn / empyrical-reloaded, periodicity declared
       reconcile.py            # three-way compare, fixed tolerances, fail loud

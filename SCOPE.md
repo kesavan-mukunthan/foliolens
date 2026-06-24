@@ -73,6 +73,7 @@ Start with the return engine on known funds to validate metric logic before any 
 - **Growth-option NAV** is the return basis (IDCW NAVs misstate total return). Regular/direct comparison = regular-growth vs direct-growth.
 - **`ReturnSource` protocol** — Fund, ShareClass, Portfolio, Benchmark all supply `value_series` + `cashflows`; returns/risk implemented once on top. TWR is the default; MWR/XIRR where cashflows exist. Risk metrics (Sharpe/drawdown/vol) are protocol surface only until step 2.
 - **Month-end is the base**; daily only for intra-month. Universe metrics materialised at month-end; personal funds may compute daily. Step 0 stores daily as the raw base and validates point-to-point. Monthly return series is the materialised analytical layer (float64, month-end to month-end); daily returns are derived on demand, not stored; trailing CAGRs are Decimal figures of record.
+- **Conversion seam:** `returns/convert.py` holds the boundary-crossing free functions — `simple_return(start,end)->float`, `to_returns(NavSeries)->ReturnSeries` (the single Decimal→float cast-at-birth), `to_index(ReturnSeries)->ValueIndex`. ReturnSeries is float64-backed with a Decimal base; ValueIndex (float levels) is distinct from NavSeries. The scalar `period_return->ReturnResult` path stays Decimal and does not route through the series.
 - Conventions (in `CLAUDE.md`): month-end NAV = last available on/before calendar month-end; SEBI annualisation (absolute < 1Y, CAGR ≥ 1Y); **day-count = actual_days / 365 (AMFI)**; declare periodicity to ffn/empyrical.
 - **Validation:** three-way (own impl vs ffn/empyrical oracle vs published). Tolerances are fixed constants, never loosened at runtime to pass — own↔oracle relative ≤ 1e-6; own/oracle↔published ≤ 10 bps after matching the published as-of. Out-of-tolerance fails loud. **Published leg = the AMC factsheet at a common month-end as-of**; aggregators (Value Research / Morningstar) are cross-checks only.
 - **Reuse, don't reimplement:** ffn / empyrical-reloaded (+ pyxirr once cashflows exist) as the production calc and/or validation oracle.
@@ -83,7 +84,7 @@ Start with the return engine on known funds to validate metric logic before any 
 - **Single-writer pattern:** a scheduled ingestion Job writes; read-only query instances pick up refreshed parquet (Cloud Run autoscaling can't share a writable DuckDB file).
 - **Daily update:** Cloud Run Job, business days, after AMFI publishes; **upsert keyed `(code, date)`** (absorbs revisions), short lookback for late-publishing funds, holiday no-op, staleness alarm.
 - **OLTP store (Postgres):** agent checkpoints, accounts, query logs — enters at Layer 2 / step 8, not before.
-- **Return materialisation:** NAVs and reconciled trailing metrics as `decimal128`/Decimal; **monthly return series stored as `float64`** for factor/regression analytics; daily returns derived on demand from stored daily NAV.
+- **Return materialisation:** NAVs and reconciled trailing metrics as `decimal128`/Decimal; **monthly return series stored as `float64`** for factor/regression analytics; daily returns derived on demand from stored daily NAV. The monthly panel stores completed months only and is immutable once written; the current in-progress month is derived on demand, never stored. Provenance stamp: each scheme's panel carries a single hash over its month-end NAV inputs + the code/convention version; a hash mismatch triggers a full recompute of that scheme's panel (one regeneration job). Daily NAV appends don't feed a completed month, so they don't trip the stamp.
 
 **Reporting**
 - **Excel/CSV exports and factsheet links are one-directional review surfaces** for eyeballing — never authoritative, never read back into the pipeline. Stored parquet, computed metrics, and recorded fixtures are the source of truth. Excel display: NAV 4dp, returns as % 2dp; failures highlighted; metadata tab carries the amfi_code → isin → option/plan → factsheet provenance.
@@ -155,6 +156,7 @@ None of the following come from mftool/AMFI:
 - **Step-0 reference set** → equity categories + short-duration debt + liquid + FoF + multi-asset; one fund paired direct+regular.
 - **Reporting** → Excel/CSV exports and factsheet links are one-directional review surfaces; fixtures/parquet/metrics are authoritative.
 - **Numeric types / materialisation** → Decimal on the path of record; float64 for analytical return series + bulk compute; monthly returns materialised, daily derived, convert once.
+- **Return-series representation & storage** → ReturnSeries float64 + Decimal base; inverse conversion yields ValueIndex (distinct from NavSeries); conversions in `returns/convert.py`; monthly panel = completed months only, immutable; per-scheme provenance hash over month-end NAV inputs, recompute-on-mismatch. ReturnResult stays Decimal.
 
 **Still open**
 - **Expense-ratio sourcing** — the step-3 sequencing conflict above. *Decision needed.*

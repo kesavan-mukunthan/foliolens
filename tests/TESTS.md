@@ -33,6 +33,11 @@ All fixtures load from `fixtures/` only. **No test calls mftool or any live sour
 ### test_no_live_fetch.py
 - `test_no_network_in_analysis` — analysis/compute paths neither import nor call the mftool client.
 
+### test_convert.py
+- `test_series_period_matches_scalar` — a period return derived from `ReturnSeries` equals scalar `period_return` for the same window, ≤1e-6.
+- `test_roundtrip_ratios` — `to_index(to_returns(nav))` reproduces periodic return ratios ≤1e-6; asserts on ratios, never NAV levels.
+- `test_series_chaining` — compounding sub-period returns on `ReturnSeries` matches the cumulative return.
+
 ## step00/
 
 ### test_reconciliation.py — parametrised over funds × periods from fixtures

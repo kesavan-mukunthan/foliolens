@@ -35,7 +35,8 @@ Fixed = costless perfect rebalancing; Drift = zero rebalancing; reality is betwe
 
 ## Value objects (carry invariants so nothing re-checks them)
 - **NavSeries** — sorted, de-duped, `Decimal` on construction; owns `.as_of()`, `.month_end()`, `.between()`. The month-end rule (last on/before calendar month-end, no look-ahead) lives here, once.
-- **ReturnSeries** — periodic returns + a base. A return series + base = a **value index** (the dual of NavSeries) — which is why composition rebuilds an index internally.
+- **ReturnSeries** — periodic returns + a base. ReturnSeries holds float64 data (path of scale) with a Decimal base anchor; a return series + base reconstructs a **ValueIndex** (the dual of NavSeries), which is why composition rebuilds an index internally.
+- **ValueIndex** — float-backed synthetic level series from inverse conversion (base·Π(1+r)). Explicitly distinct from NavSeries — no amfi_code, no month-end rule, never reconciled against stored NAV. Reconstruction round-trips return *ratios* (≤1e-6), never NAV levels (only base survives; levels rebase to 100).
 - **ReturnResult** — value + provenance (period, both endpoint NAVs, dates, method) for reconciliation/report.
 - **Cashflow** — `(date, signed amount)`; fixed sign convention (investor-out negative, in positive, terminal value as final inflow). Empty everywhere except `HeldSource`.
 
@@ -85,6 +86,6 @@ Each edge weight is a **curve** (step function: PIT disclosures, or a `WeightPol
 5. Aggregate at the **value/level**, then differentiate to returns — never average multi-period returns. Per-period re-weighting in return space is the equivalent (single-period returns are linear: `Σ wᵢ rᵢ`).
 
 ## Step-0 subset (build now vs stub)
-- **Build concretely:** `Investment`, `ReturnSeries`, `NavSeries` (with month-end), `ReturnResult`, `ReturnSource` protocol, `PricedSource`, `ShareClass`, `Fund` (priced via representative share class), engine (`period_return`, TWR, SEBI).
+- **Build concretely:** `Investment`, `ReturnSeries`, `ValueIndex`, `NavSeries` (with month-end), `ReturnResult`, `ReturnSource` protocol, `PricedSource`, `ShareClass`, `Fund` (priced via representative share class), engine (`period_return`, TWR, SEBI), `returns/convert.py` (`simple_return`, `to_returns`, `to_index`).
 - **Define but stub** (keep the contract stable, no logic): `Cashflow`, `HeldSource`, `BlendSource`, `WeightPolicy` (Fixed/Drift/PIT), `Holding`/edge + DAG resolve, `Stock`, `Portfolio`, `Benchmark`, `Cash`.
 - **Not in step 0:** look-through, weight curves, MWR, blends — this doc is the forward reference for the later steps that build them.

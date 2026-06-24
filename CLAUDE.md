@@ -19,7 +19,7 @@ Auto-loaded each session. These are the standing correctness laws of the analyti
 - Daily NAV is the stored raw base; month-end is a derived series on top. Both are queryable.
 - Daily returns are **derived on demand** from daily NAV (never stored). Monthly returns (month-end to month-end) are the **materialised** analytical series. Trailing CAGRs are figures of record.
 - Annualisation follows **SEBI**: period **< 1 year → absolute** return `(end/start − 1)`, never annualised; period **≥ 1 year → CAGR** `(end/start)^(1/years) − 1`.
-- Day-count: `years = actual_days / 365` (AMFI convention). Fixed; do not vary per call.
+- Day-count: `years = actual_days / 365` (AMFI convention). Fixed; do not vary per call. SEBI mandates CAGR but is silent on the day-count basis — it does not adjudicate actual/365 vs integer-year exponents. The per-fund reconciliation target is the AMC factsheet's own stated methodology; a days/365-vs-integer-year gap is a convention difference, not a bug, and is never closed by loosening tolerance.
 - Time-weighted return (TWR) is the default. On a cashflow-free NAV series, TWR equals the point-to-point geometric return — they must coincide. MWR/XIRR applies only where cashflows exist (not in step 0).
 
 ## Source of truth & determinism
