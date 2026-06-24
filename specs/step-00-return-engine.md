@@ -72,6 +72,7 @@ Each ≈ one 45-min session.
 ### 0.6 Three-way validation — Sonnet
 - `validation/oracle.py`: wrap ffn (primary) and empyrical-reloaded (optional); **declare periodicity explicitly**.
 - `validation/reconcile.py`: compare own vs oracle vs published; tolerances are the CLAUDE.md constants; out-of-tolerance **fails loud** with fund/period/delta. **Do not loosen tolerances to pass** — report the discrepancy as a finding.
+- **Convention decision (from the eyeball reconciliation):** 12/13 funds reconcile within ±6 bps; Nippon Gold 1Y ~21 bps out. Convention, not bug — 3Y/5Y actual/365 vs factsheet integer-year (scales with return); 1Y start-date anchor (calendar-year-back vs latest-nav-date-back) amplified by gold volatility. In 0.6, pin the start-date anchor and annualisation basis to match the factsheet; do not widen the tolerance.
 - **Accept:** reconciliation tests green on fixtures; own↔oracle ≤ 1e-6; own/oracle↔published ≤ 10 bps after as-of match.
 
 ### 0.7 Runner + Excel report — Haiku-safe

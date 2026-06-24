@@ -7,13 +7,17 @@ Auto-loaded each session. These are the standing correctness laws of the analyti
 - A build step is done only when **all tests are green**.
 
 ## Money & precision
-- `Decimal` for every monetary, NAV, and return value. Float is permitted **only** for transient ratio math at the boundary to numeric libraries (ffn / empyrical / numpy), never in a stored or returned value.
+- **Decimal on the path of record; float64 on the path of scale.**
+  - `Decimal` for anything stored as a figure of record, reconciled, or touching money: NAVs, reconciled trailing metrics (1Y/3Y/5Y CAGR), cost basis, cashflows. The engine's `ReturnResult` is a figure of record → stays `Decimal` (enforced by `test_no_float_in_returns`).
+  - `float64` for analytical return *series* (factor/regression/optimisation inputs) and bulk vectorised compute (universe screens, fixed-weight backtests) — derived views, never figures of record.
+  - Convert **once, at materialisation**, never per call. Float never flows back into a stored figure of record or a money sum.
 - NAV is stored as parquet `decimal128` (DuckDB `DECIMAL(18,6)`). It must round-trip parquet → load → compute with **no cast to DOUBLE**. Enforced by `test_decimal_roundtrip`.
 
 ## NAV & return conventions
 - Return basis is the **growth** option NAV. IDCW NAVs understate total return — never use them as the return basis. Direct-vs-regular comparison is growth-vs-growth.
 - Month-end NAV = the last available NAV **on or before** the calendar month-end. Never select a NAV dated after month-end (no look-ahead).
 - Daily NAV is the stored raw base; month-end is a derived series on top. Both are queryable.
+- Daily returns are **derived on demand** from daily NAV (never stored). Monthly returns (month-end to month-end) are the **materialised** analytical series. Trailing CAGRs are figures of record.
 - Annualisation follows **SEBI**: period **< 1 year → absolute** return `(end/start − 1)`, never annualised; period **≥ 1 year → CAGR** `(end/start)^(1/years) − 1`.
 - Day-count: `years = actual_days / 365` (AMFI convention). Fixed; do not vary per call.
 - Time-weighted return (TWR) is the default. On a cashflow-free NAV series, TWR equals the point-to-point geometric return — they must coincide. MWR/XIRR applies only where cashflows exist (not in step 0).

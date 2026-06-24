@@ -65,14 +65,14 @@ Start with the return engine on known funds to validate metric logic before any 
 
 **Data model**
 - **Two-level schema: Fund and ShareClass.** Fund = the strategy (one portfolio, one benchmark; holdings and category attach here). ShareClass = one AMFI code (`amfi_code`), carrying plan × option, NAV, expense ratio, ISIN. Regular/direct handling is a **share-class pairing under one Fund** — pair regular-growth with direct-growth to compute expense drag and breakeven (a taxable event; LTCG with 31-Jan-2018 grandfathering must be factored). Fund grouping is derived by parsing names/ISINs (fragile; tested, with a manual-override hook).
-- **`Decimal`** for all monetary/NAV/return values; float only for transient ratio math.
+- **Numeric types by role:** `Decimal`/`decimal128` on the path of record (NAVs, reconciled metrics, cost basis, cashflows); `float64` for analytical return series and bulk vectorised compute. Convert once at materialisation.
 - Cost basis stored at transaction grain (lot-level FIFO + grandfathering), never derived loosely.
 - Tenancy key and PII segregation from day one, even with a single user.
 
 **Return engine**
 - **Growth-option NAV** is the return basis (IDCW NAVs misstate total return). Regular/direct comparison = regular-growth vs direct-growth.
 - **`ReturnSource` protocol** — Fund, ShareClass, Portfolio, Benchmark all supply `value_series` + `cashflows`; returns/risk implemented once on top. TWR is the default; MWR/XIRR where cashflows exist. Risk metrics (Sharpe/drawdown/vol) are protocol surface only until step 2.
-- **Month-end is the base**; daily only for intra-month. Universe metrics materialised at month-end; personal funds may compute daily. Step 0 stores daily as the raw base and validates point-to-point.
+- **Month-end is the base**; daily only for intra-month. Universe metrics materialised at month-end; personal funds may compute daily. Step 0 stores daily as the raw base and validates point-to-point. Monthly return series is the materialised analytical layer (float64, month-end to month-end); daily returns are derived on demand, not stored; trailing CAGRs are Decimal figures of record.
 - Conventions (in `CLAUDE.md`): month-end NAV = last available on/before calendar month-end; SEBI annualisation (absolute < 1Y, CAGR ≥ 1Y); **day-count = actual_days / 365 (AMFI)**; declare periodicity to ffn/empyrical.
 - **Validation:** three-way (own impl vs ffn/empyrical oracle vs published). Tolerances are fixed constants, never loosened at runtime to pass — own↔oracle relative ≤ 1e-6; own/oracle↔published ≤ 10 bps after matching the published as-of. Out-of-tolerance fails loud. **Published leg = the AMC factsheet at a common month-end as-of**; aggregators (Value Research / Morningstar) are cross-checks only.
 - **Reuse, don't reimplement:** ffn / empyrical-reloaded (+ pyxirr once cashflows exist) as the production calc and/or validation oracle.
@@ -83,6 +83,7 @@ Start with the return engine on known funds to validate metric logic before any 
 - **Single-writer pattern:** a scheduled ingestion Job writes; read-only query instances pick up refreshed parquet (Cloud Run autoscaling can't share a writable DuckDB file).
 - **Daily update:** Cloud Run Job, business days, after AMFI publishes; **upsert keyed `(code, date)`** (absorbs revisions), short lookback for late-publishing funds, holiday no-op, staleness alarm.
 - **OLTP store (Postgres):** agent checkpoints, accounts, query logs — enters at Layer 2 / step 8, not before.
+- **Return materialisation:** NAVs and reconciled trailing metrics as `decimal128`/Decimal; **monthly return series stored as `float64`** for factor/regression analytics; daily returns derived on demand from stored daily NAV.
 
 **Reporting**
 - **Excel/CSV exports and factsheet links are one-directional review surfaces** for eyeballing — never authoritative, never read back into the pipeline. Stored parquet, computed metrics, and recorded fixtures are the source of truth. Excel display: NAV 4dp, returns as % 2dp; failures highlighted; metadata tab carries the amfi_code → isin → option/plan → factsheet provenance.
@@ -153,6 +154,7 @@ None of the following come from mftool/AMFI:
 - **Published-return source** → AMC factsheet at a common month-end as-of; aggregators cross-check only.
 - **Step-0 reference set** → equity categories + short-duration debt + liquid + FoF + multi-asset; one fund paired direct+regular.
 - **Reporting** → Excel/CSV exports and factsheet links are one-directional review surfaces; fixtures/parquet/metrics are authoritative.
+- **Numeric types / materialisation** → Decimal on the path of record; float64 for analytical return series + bulk compute; monthly returns materialised, daily derived, convert once.
 
 **Still open**
 - **Expense-ratio sourcing** — the step-3 sequencing conflict above. *Decision needed.*
@@ -162,3 +164,4 @@ None of the following come from mftool/AMFI:
 - **Onboarding mechanism** — CAS email vs MFCentral QR (deferred to Layer 2).
 - **Verify Morningstar/mstarpy** as the holdings + TRI source — India coverage, AMFI-code matching, and terms of use. Also check AMFI portal depth for machine-readable historical holdings before committing to a backfill scraper.
 - **Security master source selection** — NSDL + NSE daily symbol-ISIN map is the assumed path. Confirm coverage completeness (especially for older ISINs in historical holdings) before build.
+- **Step-0 anchor/annualisation convention** — pin in 0.6 (gold 1Y ~21 bps); match factsheet, don't loosen tolerance.

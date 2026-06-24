@@ -39,6 +39,11 @@ Fixed = costless perfect rebalancing; Drift = zero rebalancing; reality is betwe
 - **ReturnResult** — value + provenance (period, both endpoint NAVs, dates, method) for reconciliation/report.
 - **Cashflow** — `(date, signed amount)`; fixed sign convention (investor-out negative, in positive, terminal value as final inflow). Empty everywhere except `HeldSource`.
 
+## Numeric types & materialisation
+- **Path of record → `Decimal`/`decimal128`:** daily NAV, reconciled trailing metrics, cost basis, cashflows. `NavSeries` and `ReturnResult` stay Decimal.
+- **Path of scale → `float64`:** analytical return *series* (factor/regression/optimisation), universe screens, fixed-weight backtests — float-native libraries, derived views, not figures of record. Float precision is far below the binding constraint here; sampling error dominates factor results.
+- **Materialise vs derive:** daily NAV stored (decimal128); **monthly return series materialised** (`float64` — matches the IIM-A library and attribution); **daily returns derived on demand**; month-end NAV derived. Convert once at materialisation.
+
 ## Concrete investments (all the same class; differ by source + role)
 - **Stock** — leaf; PricedSource over price/TRI; no holdings.
 - **ShareClass** — one AMFI code (`isin, plan, option`); PricedSource over NAV. The true priced unit.
