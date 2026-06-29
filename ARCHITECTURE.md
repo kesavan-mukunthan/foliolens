@@ -45,6 +45,17 @@ Fixed = costless perfect rebalancing; Drift = zero rebalancing; reality is betwe
 - **Path of scale → `float64`:** analytical return *series* (factor/regression/optimisation), universe screens, fixed-weight backtests — float-native libraries, derived views, not figures of record. Float precision is far below the binding constraint here; sampling error dominates factor results.
 - **Materialise vs derive:** daily NAV stored (decimal128); **monthly return series materialised** (`float64` — matches the IIM-A library and attribution); **daily returns derived on demand**; month-end NAV derived. Convert once at materialisation.
 
+## Analytics (functions over the return series)
+A layer above the model: pure free functions over `ReturnSeries`, never methods on the data classes or on `ReturnSource`. Mirrors the engine — `period_return` is a free function; analytics follow the identical pattern.
+
+- Two branches off NAV, never unified. (A) `period_return(source) -> ReturnResult` — the SEBI scalar, Decimal, a figure of record. (B) `to_returns(NavSeries) -> ReturnSeries` — the materialised monthly float64 series. Risk metrics consume B; they never touch the scalar path.
+- Pure metric functions: `f(r: ReturnSeries, …) -> MetricsResult`. They receive a return series and structurally cannot re-derive from NAV (never see it) — which makes own-vs-oracle trivial.
+- Investment adapters: `sharpe_of(investment, rf)` read `investment.returns` (the materialised series) and delegate. "Returns already present" lives here.
+- Drawdown is the one exception: base is daily NAV, read via `investment.source`, not the monthly series. The protocol exposes both seams — `.source` (daily value path) and `.returns` (periodic series).
+- rf is an Investment, not a scalar param: the 91-day T-bill (IIMA-bundled column) with its own return series; Sharpe/Sortino consume it exactly as beta/alpha consume the benchmark Investment.
+- Benchmark identity: natural key (provider, index_name, return_variant). Return variant (TRI vs PRI) is part of identity -> PRI cannot be silently substituted. The fund->benchmark mapping is a stored default (FK to a benchmark Investment, at Fund level), overridable by an explicit arg.
+- Output contract: the metrics artifact — fund -> {metadata, metrics, series}, serializable, versioned, the eventual API payload. Renderers are disposable consumers; the artifact is the durable output seam, dual to DataAccess on input.
+
 ## Concrete investments (all the same class; differ by source + role)
 - **Stock** — leaf; PricedSource over price/TRI; no holdings.
 - **ShareClass** — one AMFI code (`isin, plan, option`); PricedSource over NAV. The true priced unit.
@@ -84,6 +95,8 @@ Each edge weight is a **curve** (step function: PIT disclosures, or a `WeightPol
 3. Weights at one `as_of` sum to 1 via an explicit `Cash`/residual node.
 4. Source + policy are assigned in the composition root, not by callers.
 5. Aggregate at the **value/level**, then differentiate to returns — never average multi-period returns. Per-period re-weighting in return space is the equivalent (single-period returns are linear: `Σ wᵢ rᵢ`).
+6. Analytics are free functions over `ReturnSeries`, never methods on `ReturnSource` or any data class. Drawdown is the sole reader of daily NAV (via `.source`).
+7. rf and benchmark are `Investment`s, not parameters. Benchmark return-variant (TRI/PRI) is part of identity; PRI is never used for relative metrics.
 
 ## Step-0 subset (build now vs stub)
 - **Build concretely:** `Investment`, `ReturnSeries`, `ValueIndex`, `NavSeries` (with month-end), `ReturnResult`, `ReturnSource` protocol, `PricedSource`, `ShareClass`, `Fund` (priced via representative share class), engine (`period_return`, TWR, SEBI), `returns/convert.py` (`simple_return`, `to_returns`, `to_index`).
