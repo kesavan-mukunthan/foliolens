@@ -1,6 +1,6 @@
 # CLAUDE.md — FolioLens standing conventions
 
-Auto-loaded each session. These are the standing correctness laws of the analytical / return engine. Step-specific acceptance lives in `specs/step-NN-*.md`, which **reference this file rather than restate it**. Every law below is enforced by an executable test in `tests/invariants/`. "Honour the convention" is not the gate — a green test is.
+Auto-loaded each session. These are the standing correctness laws of the analytical / return engine. Spec-specific acceptance lives in `specs/spec-*.md`, which **reference this file rather than restate it**. Every law below is enforced by an executable test in `tests/invariants/`. "Honour the convention" is not the gate — a green test is.
 
 ## Working model
 - Design, specs, and review happen in the Claude.ai project. Construction happens in Claude Code against a committed spec.
@@ -22,9 +22,19 @@ Auto-loaded each session. These are the standing correctness laws of the analyti
 - Day-count: `years = actual_days / 365` (AMFI convention). Fixed; do not vary per call. SEBI mandates CAGR but is silent on the day-count basis — it does not adjudicate actual/365 vs integer-year exponents. The per-fund reconciliation target is the AMC factsheet's own stated methodology; a days/365-vs-integer-year gap is a convention difference, not a bug, and is never closed by loosening tolerance.
 - Time-weighted return (TWR) is the default. On a cashflow-free NAV series, TWR equals the point-to-point geometric return — they must coincide. MWR/XIRR applies only where cashflows exist (not in step 0).
 
+## Analytics conventions
+- Analytics consume the materialised monthly `ReturnSeries` (float64). Pure functions take `ReturnSeries`; `Investment` adapters read `.returns`. Drawdown is the only exception — base = daily NAV via `.source`.
+- Canonical monthly return = simple (arithmetic), month-end to month-end. Log returns derived on demand.
+- Annualisation: return geometric `(1+R)^(12/n) − 1`; volatility `√12`. Declared explicitly to the oracle.
+- Risk-free = IIMA 91-day T-bill column (RBI new-issuance yield, 250-trading-day basis, bundled with the factor library). Same rf for Sharpe and Sortino; Sortino MAR = rf. An `Investment`, not a scalar. Live extension past the IIMA release lag comes only from RBI-direct; fixtures stay inside the IIMA range.
+- Rolling returns: monthly step, 1/3/5y windows. A window longer than history emits no point — an empty young-fund panel is correct, not a bug.
+- Benchmark return-variant (TRI vs PRI) is part of benchmark identity. Never PRI for any relative metric. fund→benchmark is a stored default, overridable.
+- Analytics acceptance = own-vs-oracle on a frozen fixture `ReturnSeries` — never published or live. (The return engine keeps the three-way incl. published; analytics stop at own-vs-oracle.)
+
 ## Source of truth & determinism
 - Analytics read **stored** NAV only. Never call mftool (or any live source) at read/compute time. Ingestion writes; analysis reads stored parquet.
 - The same stored inputs must produce an identical validation report across runs.
+- **IIMA factor library is not licensed for redistribution** (derived from CMIE Prowess). Use as a computation input with citation (the 2013 working paper); never republish the factor or rf series as data. Re-check on any external-exposure decision — same discipline as benchmark TRI and survivorship-free universe sourcing.
 
 ## Validation
 - Three-way: own implementation vs a library oracle (ffn primary; empyrical-reloaded optional) vs the published figure.
@@ -38,4 +48,4 @@ Auto-loaded each session. These are the standing correctness laws of the analyti
 - Any Excel/CSV export is a **one-directional review surface** for eyeballing. It is never authoritative and is never read back into the pipeline. Stored parquet, computed metrics, and recorded fixtures are the source of truth.
 
 ## Protocol
-- `ReturnSource`: Fund, ShareClass, Portfolio, Benchmark each supply `value_series` + `cashflows`; returns/risk are implemented once on top. Risk metrics (Sharpe, drawdown, vol) are **protocol surface only** until step 2.
+- `ReturnSource` supplies `value_series` + `cashflows` **only**. Returns are produced by the `period_return` free function. **Risk/analytics are free functions over `ReturnSeries`, not methods on `ReturnSource` or any data class** — mirroring the engine. The earlier "risk metrics are protocol surface" rule is **withdrawn** (see `specs/spec-analytics.md` §0): no `sharpe`/`max_drawdown`/`volatility` on the protocol or the concrete sources.

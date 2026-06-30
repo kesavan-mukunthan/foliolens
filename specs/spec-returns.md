@@ -19,10 +19,10 @@ NAV → returns for a fixed set of known funds, validated three ways (own impl, 
 - Excel validation report (xlsxwriter), write-only.
 
 ## Out of scope — do not build
-- Universe-scale ingestion: no daily Cloud Run job, no upsert/staleness alarm, no full-universe fetch. That is step 4.
+- Universe-scale ingestion: no daily Cloud Run job, no upsert/staleness alarm, no full-universe fetch. That is `spec-scale`.
 - GCS / Docker / GitHub Actions. **Local only.**
-- Risk metrics (Sharpe/drawdown/vol) — protocol surface only; implemented at step 2.
-- CAS parsing, cashflows, XIRR/MWR — step 1+.
+- Risk metrics (Sharpe/drawdown/vol) — implemented in `spec-analytics` (as free functions, not protocol surface; see `spec-analytics §0`).
+- CAS parsing, cashflows, XIRR/MWR — `spec-personal`.
 - Holdings DAG, look-through exposure, blends, weight curves, MWR — **defined as stubs only**; built in later steps (see `ARCHITECTURE.md`).
 - `pyxirr` — not used here.
 
@@ -65,7 +65,7 @@ Each ≈ one 45-min session.
 - **Accept:** `test_weekend_boundary` and `test_no_lookahead` green.
 
 ### 0.5 Domain model + engine — Sonnet
-- `model/` (per `ARCHITECTURE.md`): `Investment`, value objects (`NavSeries`, `ReturnSeries`, `ReturnResult`, `Cashflow`), `ReturnSource` protocol + `PricedSource`; `ShareClass`/`Fund` concrete (Fund prices via a representative ShareClass). Stub `BlendSource`, `HeldSource`, `WeightPolicy`, holdings/`Cash` — defined, no logic. Risk-metric methods declared, not implemented.
+- `model/` (per `ARCHITECTURE.md`): `Investment`, value objects (`NavSeries`, `ReturnSeries`, `ReturnResult`, `Cashflow`), `ReturnSource` protocol + `PricedSource`; `ShareClass`/`Fund` concrete (Fund prices via a representative ShareClass). Stub `BlendSource`, `HeldSource`, `WeightPolicy`, holdings/`Cash` — defined, no logic. *(Historical: risk-metric methods were declared on the protocol here; this is superseded by `spec-analytics §0`, which withdraws them — analytics are now free functions over `ReturnSeries`, not protocol surface.)*
 - `returns/engine.py`: `period_return(source, period, as_of)` — TWR; absolute (<1Y) / CAGR (≥1Y) under the SEBI rule; `years = actual_days/365`; `Decimal` throughout, float only at the library boundary. One function, every source type.
 - **Accept:** invariant tests green — SEBI both directions, chaining-consistency, TWR == point-to-point on a cashflow-free series; `ShareClass` satisfies `ReturnSource` (mypy).
 
@@ -113,7 +113,7 @@ foliolens/
   SCOPE.md
   ARCHITECTURE.md
   pyproject.toml
-  specs/step-00-return-engine.md
+  specs/spec-returns.md
   src/foliolens/
     data_access.py            # single read seam: local parquet now, gs:// later
     ingest/
