@@ -150,17 +150,6 @@ None of the following come from mftool/AMFI:
 - **Scope boundary:** applies to equity fund categories only (large cap, mid cap, small cap, flexi cap, multi cap, value/contra, ELSS). Do not apply to debt, hybrid, or liquid funds.
 - SMB–HML correlation is 37% (higher than US norms) — factor loading estimates will have wider confidence intervals; focus on residual alpha t-stat, not individual beta magnitudes.
 
-## Learning Alignment
-
-| Step | Curriculum week |
-|------|----------------|
-| 0–2 | Data engineering foundations (parallel activity) |
-| 3 | Week 3 — RAG and retrieval patterns |
-| 4–5 | Week 2 — embeddings; Week 4 — LangGraph agents |
-| 6–7 | Week 6 — MCP; Week 7 — evals |
-| 8 | Week 8 — multi-agent capstone |
-| 9 | Phase 2 — MLE block |
-
 ## Open Questions
 
 **Resolved**
