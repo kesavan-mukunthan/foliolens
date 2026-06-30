@@ -12,7 +12,6 @@ No I/O here. All concrete types are frozen dataclasses.
 from __future__ import annotations
 
 from dataclasses import dataclass
-from decimal import Decimal
 from typing import Protocol
 
 from .holdings import Holding
@@ -66,15 +65,6 @@ class ShareClass:
     def cashflows(self) -> tuple[Cashflow, ...]:
         return ()
 
-    def sharpe(self) -> Decimal:
-        raise NotImplementedError
-
-    def max_drawdown(self) -> Decimal:
-        raise NotImplementedError
-
-    def volatility(self) -> Decimal:
-        raise NotImplementedError
-
     # --- Investment protocol surface ---
 
     @property
@@ -107,15 +97,6 @@ class Fund:
     @property
     def cashflows(self) -> tuple[Cashflow, ...]:
         return ()
-
-    def sharpe(self) -> Decimal:
-        raise NotImplementedError
-
-    def max_drawdown(self) -> Decimal:
-        raise NotImplementedError
-
-    def volatility(self) -> Decimal:
-        raise NotImplementedError
 
     @property
     def returns(self) -> ReturnSeries:

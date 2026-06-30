@@ -1,1 +1,1 @@
-"""Returns sub-package: ReturnSource protocol and return engine."""
+"""Returns sub-package: the return engine."""
