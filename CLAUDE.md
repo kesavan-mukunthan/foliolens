@@ -47,5 +47,8 @@ Auto-loaded each session. These are the standing correctness laws of the analyti
 ## Reporting
 - Any Excel/CSV export is a **one-directional review surface** for eyeballing. It is never authoritative and is never read back into the pipeline. Stored parquet, computed metrics, and recorded fixtures are the source of truth.
 
+## Commits & PRs
+- Keep the `Co-Authored-By: Claude ...` trailer on commits. **Do not** add a `Claude-Session:` line (or any `https://claude.ai/code/session_...` link) to commit messages or PR bodies — no session links in repo artifacts.
+
 ## Protocol
 - `ReturnSource` supplies `value_series` + `cashflows` **only**. Returns are produced by the `period_return` free function. **Risk/analytics are free functions over `ReturnSeries`, not methods on `ReturnSource` or any data class** — mirroring the engine. The earlier "risk metrics are protocol surface" rule is **withdrawn** (see `specs/spec-analytics.md` §0): no `sharpe`/`max_drawdown`/`volatility` on the protocol or the concrete sources.
