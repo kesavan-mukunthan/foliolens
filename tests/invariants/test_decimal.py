@@ -9,7 +9,6 @@ from foliolens.data_access import DataAccess
 from foliolens.ingest.land import land
 from foliolens.ingest.mftool_client import NavRecord
 from foliolens.model.sources import PricedSource
-from foliolens.model.value_objects import NavSeries
 from foliolens.returns.engine import period_return
 
 
