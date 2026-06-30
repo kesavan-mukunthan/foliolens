@@ -6,9 +6,7 @@ The conftest _no_network fixture guards against accidental live calls.
 import datetime
 from decimal import Decimal
 
-import pytest
-
-from foliolens.ingest.mftool_client import NavRecord, normalise
+from foliolens.ingest.mftool_client import normalise
 
 
 CODE = "120586"
