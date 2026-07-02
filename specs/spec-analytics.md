@@ -13,11 +13,7 @@ Risk and risk-adjusted metrics over the **materialised monthly `ReturnSeries`** 
 Analytics acceptance is **own-vs-oracle on a frozen fixture `ReturnSeries`** — never against the published figure, never against a live/in-flux series. This lets the analytics track run in parallel with return reconciliation and with spec-benchmarks without recoupling. Distinct from the return engine, which additionally carries the published leg.
 
 ## §0 — Pre-spec refactor (own commit, must land first)
-- Remove `sharpe()`, `max_drawdown()`, `volatility()` from the `ReturnSource` protocol (`model/sources.py`) **and** every concrete source (`PricedSource`, `HeldSource`, `BlendSource`) and `ShareClass` / `Fund`.
-- `ReturnSource` collapses to its true surface: `value_series` + `cashflows`.
-- Delete `returns/return_source.py` — dead stub; the real protocol lives in `model/sources.py`.
-- Withdraw the "risk metrics are protocol surface until step 2" rule (now updated in `CLAUDE.md` / `ARCHITECTURE.md`).
-- **Accept:** existing invariant + return-engine tests still green; `ReturnSource` carries no risk method; nothing imports `return_source.py`.
+§0 refactor landed on main; verified — `ReturnSource` carries `value_series` + `cashflows` only.
 
 ## In scope
 - **`analytics/` package** — pure free functions over `ReturnSeries`; rf and benchmark passed as **`Investment`** args (never scalar params). Each returns a `MetricsResult`.
