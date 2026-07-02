@@ -1,7 +1,9 @@
 """Value objects for the FolioLens domain model.
 
-NavSeries, ReturnSeries, ReturnResult, Cashflow — all frozen, Decimal throughout.
-Invariants are enforced on construction; callers never re-check them.
+NavSeries, ReturnResult, Cashflow — figures of record, Decimal throughout.
+ReturnSeries and ValueIndex — path of scale, float64 per-period data with a
+Decimal base anchor only. Invariants are enforced on construction; callers
+never re-check them.
 """
 from __future__ import annotations
 
@@ -9,6 +11,8 @@ from collections.abc import Iterable
 from dataclasses import dataclass
 from datetime import date
 from decimal import Decimal
+
+import numpy as np
 
 
 def _build_nav_data(
@@ -68,17 +72,60 @@ class NavSeries:
         )
 
 
-@dataclass(frozen=True)
+@dataclass(frozen=True, eq=False)
 class ReturnSeries:
-    """Periodic returns indexed by period-end date, plus a base level (default 100)."""
+    """Periodic returns (float64, path of scale) indexed by period-end date.
 
-    data: tuple[tuple[date, Decimal], ...]
+    Per-period data is float64 — never Decimal. Only ``base`` (a level anchor,
+    default 100) stays Decimal; a return series + base reconstructs a ValueIndex.
+    ``values`` is coerced to a read-only float64 array on construction.
+    """
+
+    dates: tuple[date, ...]
+    values: np.ndarray
     base: Decimal = Decimal("100")
 
     def __post_init__(self) -> None:
-        for _, r in self.data:
-            if not isinstance(r, Decimal):
-                raise TypeError(f"return value must be Decimal, got {type(r).__name__}")
+        values = np.array(self.values, dtype=np.float64, copy=True)
+        if len(self.dates) != len(values):
+            raise ValueError(
+                f"dates/values length mismatch: {len(self.dates)} != {len(values)}"
+            )
+        if any(a >= b for a, b in zip(self.dates, self.dates[1:])):
+            raise ValueError("dates must be strictly ascending")
+        values.flags.writeable = False
+        object.__setattr__(self, "values", values)
+
+    def __len__(self) -> int:
+        return len(self.dates)
+
+
+@dataclass(frozen=True, eq=False)
+class ValueIndex:
+    """Float-backed synthetic level series (base·Π(1+r)) — the dual of NavSeries.
+
+    Explicitly NOT a NavSeries: no amfi_code, no month-end rule, never reconciled
+    against stored NAV. It is a derived view on the path of scale; reconstruction
+    round-trips return *ratios*, never NAV levels (levels rebase to the base).
+    ``levels`` is coerced to a read-only float64 array on construction.
+    """
+
+    dates: tuple[date, ...]
+    levels: np.ndarray
+
+    def __post_init__(self) -> None:
+        levels = np.array(self.levels, dtype=np.float64, copy=True)
+        if len(self.dates) != len(levels):
+            raise ValueError(
+                f"dates/levels length mismatch: {len(self.dates)} != {len(levels)}"
+            )
+        if any(a >= b for a, b in zip(self.dates, self.dates[1:])):
+            raise ValueError("dates must be strictly ascending")
+        levels.flags.writeable = False
+        object.__setattr__(self, "levels", levels)
+
+    def __len__(self) -> int:
+        return len(self.dates)
 
 
 @dataclass(frozen=True)
