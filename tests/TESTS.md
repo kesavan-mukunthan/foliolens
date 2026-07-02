@@ -16,7 +16,8 @@ All fixtures load from `fixtures/` only. **No test calls mftool or any live sour
 - `test_sub_year_is_absolute` — a 6-month period returns `(end/start − 1)`, not annualised.
 - `test_over_year_is_cagr` — a 3Y period returns `(end/start)^(1/years) − 1`.
 - `test_one_year_boundary` — a 1Y period uses the ≥1Y path and equals the absolute return at exactly 1Y.
-- `test_daycount_is_365` — `years == actual_days / 365`.
+- `test_si_daycount_is_365` — SI ≥1Y uses `years == actual_days / 365`.
+- `test_anchored_period_uses_integer_years` — 1Y/3Y/5Y use exponent `1/n`; a leap-spanning 3Y (1096 days) differs from the days/365 variant.
 
 ### test_twr.py
 - `test_twr_equals_point_to_point` — on a cashflow-free series, TWR == point-to-point geometric return.

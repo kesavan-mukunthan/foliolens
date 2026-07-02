@@ -66,13 +66,13 @@ Each ≈ one 45-min session.
 
 ### 0.5 Domain model + engine — Sonnet
 - `model/` (per `ARCHITECTURE.md`): `Investment`, value objects (`NavSeries`, `ReturnSeries`, `ReturnResult`, `Cashflow`), `ReturnSource` protocol + `PricedSource`; `ShareClass`/`Fund` concrete (Fund prices via a representative ShareClass). Stub `BlendSource`, `HeldSource`, `WeightPolicy`, holdings/`Cash` — defined, no logic. *(Historical: risk-metric methods were declared on the protocol here; this is superseded by `spec-analytics §0`, which withdraws them — analytics are now free functions over `ReturnSeries`, not protocol surface.)*
-- `returns/engine.py`: `period_return(source, period, as_of)` — TWR; absolute (<1Y) / CAGR (≥1Y) under the SEBI rule; `years = actual_days/365`; `Decimal` throughout, float only at the library boundary. One function, every source type.
+- `returns/engine.py`: `period_return(source, period, as_of)` — TWR; absolute (<1Y) / CAGR (≥1Y) under the SEBI rule; integer-year exponent (1/n) for anchored periods, `days/365` for SI; `Decimal` throughout, float only at the library boundary. One function, every source type.
 - **Accept:** invariant tests green — SEBI both directions, chaining-consistency, TWR == point-to-point on a cashflow-free series; `ShareClass` satisfies `ReturnSource` (mypy).
 
 ### 0.6 Three-way validation — Sonnet
 - `validation/oracle.py`: wrap ffn (primary) and empyrical-reloaded (optional); **declare periodicity explicitly**.
 - `validation/reconcile.py`: compare own vs oracle vs published; tolerances are the CLAUDE.md constants; out-of-tolerance **fails loud** with fund/period/delta. **Do not loosen tolerances to pass** — report the discrepancy as a finding.
-- **Convention decision (from the eyeball reconciliation):** 12/13 funds reconcile within ±6 bps; Nippon Gold 1Y ~21 bps out. Convention, not bug — 3Y/5Y actual/365 vs factsheet integer-year (scales with return); 1Y start-date anchor (calendar-year-back vs latest-nav-date-back) amplified by gold volatility. In 0.6, pin the start-date anchor and annualisation basis to match the factsheet; do not widen the tolerance.
+- **Convention decision (resolved):** the eyeball gap decomposed into two root causes. (1) Annualising anchored periods with `days/365` overcounts leap days vs the factsheet integer-year exponent — fixed in the engine (see `CLAUDE.md` day-count). (2) Nippon Gold Savings' printed CAGR % column is internally inconsistent with the factsheet's own growth-of-₹10,000 column (+3 to +22 bps); the amount column reproduces `end_nav/start_nav` on our anchors to the rupee, so `published_returns.csv` for 114616/118663 (1Y/3Y/5Y) is re-sourced from the amount column. SI rows are consistent and unchanged. Tolerances unchanged.
 - **Accept:** reconciliation tests green on fixtures; own↔oracle ≤ 1e-6; own/oracle↔published ≤ 10 bps after as-of match.
 
 ### 0.7 Runner + Excel report — Haiku-safe
