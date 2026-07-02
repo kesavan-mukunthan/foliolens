@@ -37,6 +37,12 @@ def to_returns(nav: NavSeries) -> ReturnSeries:
     """
     if len(nav) < 2:
         raise ValueError(f"need >= 2 NAV points to compute returns, got {len(nav)}")
+    # simple_return validates each pair's start; the terminal NAV is only ever an
+    # end, so guard it explicitly to reject a non-positive final NAV.
+    if nav.data[-1][1] <= 0:
+        raise ValueError(
+            f"NAV must be > 0, got {nav.data[-1][1]} on {nav.data[-1][0]}"
+        )
     dates = tuple(d for d, _ in nav.data[1:])
     values = np.array(
         [

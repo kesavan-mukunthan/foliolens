@@ -64,6 +64,17 @@ def test_to_returns_rejects_nonpositive_nav() -> None:
         )
 
 
+def test_to_returns_rejects_nonpositive_final_nav() -> None:
+    # Terminal NAV is only ever an end, so it must be guarded explicitly.
+    with pytest.raises(ValueError):
+        to_returns(
+            _nav(
+                (date(2024, 1, 31), Decimal("100.00")),
+                (date(2024, 2, 29), Decimal("0.00")),
+            )
+        )
+
+
 # ---------------------------------------------------------------------------
 # Round-trip — ratios, never NAV levels
 # ---------------------------------------------------------------------------

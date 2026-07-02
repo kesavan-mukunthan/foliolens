@@ -86,9 +86,7 @@ class ReturnSeries:
     base: Decimal = Decimal("100")
 
     def __post_init__(self) -> None:
-        values = np.asarray(self.values, dtype=np.float64)
-        if values.dtype != np.float64:
-            raise TypeError(f"values must be float64, got {values.dtype}")
+        values = np.array(self.values, dtype=np.float64, copy=True)
         if len(self.dates) != len(values):
             raise ValueError(
                 f"dates/values length mismatch: {len(self.dates)} != {len(values)}"
@@ -116,9 +114,7 @@ class ValueIndex:
     levels: np.ndarray
 
     def __post_init__(self) -> None:
-        levels = np.asarray(self.levels, dtype=np.float64)
-        if levels.dtype != np.float64:
-            raise TypeError(f"levels must be float64, got {levels.dtype}")
+        levels = np.array(self.levels, dtype=np.float64, copy=True)
         if len(self.dates) != len(levels):
             raise ValueError(
                 f"dates/levels length mismatch: {len(self.dates)} != {len(levels)}"
