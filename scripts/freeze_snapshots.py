@@ -1,10 +1,11 @@
 """One-time snapshot freeze script.
 
 Reads fixtures/funds.csv, fetches each fund's full NAV history via the
-mftool client, writes frozen parquet to fixtures/nav_snapshots/.
+mftool client, writes a single frozen parquet (fixtures/nav_snapshots/nav.parquet)
+with amfi_code as a column, sorted by (amfi_code, date).
 
 Run once: uv run python scripts/freeze_snapshots.py
-Commit the output; thereafter tests read frozen files and never touch the network.
+Commit the output; thereafter tests read the frozen file and never touch the network.
 """
 import csv
 import sys
@@ -18,7 +19,7 @@ SNAPSHOTS_DIR = ROOT / "fixtures" / "nav_snapshots"
 
 
 def main() -> None:
-    from foliolens.ingest.mftool_client import get_nav_history
+    from foliolens.ingest.mftool_client import NavRecord, get_nav_history
     from foliolens.ingest.land import land
     from foliolens.data_access import DataAccess
 
@@ -27,11 +28,12 @@ def main() -> None:
 
     SNAPSHOTS_DIR.mkdir(parents=True, exist_ok=True)
     print(f"Freeze date : {date.today()}")
-    print(f"Destination : {SNAPSHOTS_DIR}")
+    print(f"Destination : {SNAPSHOTS_DIR / 'nav.parquet'}")
     print(f"Funds       : {len(funds)}")
     print()
 
     ok = 0
+    all_records: list[NavRecord] = []
     for row in funds:
         amfi_code = row["amfi_code"]
         name = row["fund_name"]
@@ -42,9 +44,12 @@ def main() -> None:
             print(f"SKIP  {e}", file=sys.stderr)
             continue
         last_date = records[-1].date
-        land(records, SNAPSHOTS_DIR)
+        all_records.extend(records)
         print(f"{len(records)} records  last={last_date}")
         ok += 1
+
+    # One consolidated file per freeze run — amfi_code as a column, sorted.
+    land(all_records, SNAPSHOTS_DIR)
 
     print(f"\nLanded {ok}/{len(funds)} funds.")
 
