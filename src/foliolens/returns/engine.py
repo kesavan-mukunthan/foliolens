@@ -3,7 +3,8 @@
 Implements TWR (time-weighted return) and the SEBI annualisation rule:
   - period < 1 year  → absolute return (end/start − 1), never annualised
   - period ≥ 1 year  → CAGR (end/start)^(1/years) − 1
-Day-count: years = actual_days / 365 (AMFI convention, fixed).
+Day-count: anchored periods (1Y/3Y/5Y) use an integer-year exponent (1/n);
+SI uses years = actual_days / 365. Matches AMC factsheet methodology.
 Decimal throughout; no float in any stored or returned value.
 """
 from __future__ import annotations
@@ -15,6 +16,8 @@ from ..model.sources import ReturnSource
 from ..model.value_objects import ReturnResult
 
 getcontext().prec = 28
+
+_ANCHOR_YEARS: dict[str, int] = {"1Y": 1, "3Y": 3, "5Y": 5}
 
 
 def _subtract_years(d: date, n: int) -> date:
@@ -35,7 +38,8 @@ def period_return(
     period: "1Y" | "3Y" | "5Y" | "SI"
 
     On a cashflow-free series, TWR equals the point-to-point geometric return.
-    SEBI rule: actual_days < 365 → absolute; ≥ 365 → CAGR with years = days/365.
+    SEBI rule: actual_days < 365 → absolute; ≥ 365 → CAGR.
+    CAGR exponent: 1/n for anchored periods (1Y/3Y/5Y); days/365 for SI.
     """
     series = source.value_series
     if not series.data:
@@ -70,7 +74,10 @@ def period_return(
         value: Decimal = end_nav / start_nav - Decimal(1)
         method = "absolute"
     else:
-        years_d: Decimal = Decimal(actual_days) / Decimal(365)
+        n = _ANCHOR_YEARS.get(period)
+        years_d: Decimal = (
+            Decimal(n) if n is not None else Decimal(actual_days) / Decimal(365)
+        )
         value = (end_nav / start_nav) ** (Decimal(1) / years_d) - Decimal(1)
         method = "CAGR"
 
