@@ -38,7 +38,7 @@ Four questions the system answers:
 Specs come in two axes. **Capability specs** = what the product can do. **Platform specs** = how it's served at scale. Order is sequenced here; parallel tracks and the platform-phase boundary are marked. Only `spec-returns` is built; `spec-analytics` is ready; the rest are forward references.
 
 **Phase A — analytical core (local, on fixtures)**
-- `spec-returns` — NAV→returns, TWR/SEBI, three-way validation. **Built.**
+- `spec-returns` — NAV→returns, TWR/SEBI, three-way validation. **Engine + model + DataAccess built; oracle/reconcile/report/cli pending.**
 - `spec-analytics` ‖ `spec-benchmarks` — *parallel.* Risk/risk-adjusted metrics over `ReturnSeries`; rf + benchmark-TRI ingestion + fund→benchmark mapping. Analytics gates on **own-vs-oracle**, not the published reconciliation, which is what lets it run beside return validation. A disposable HTML+Plotly renderer is the tail of `spec-analytics`.
 
 **— Platform-phase boundary: opens once analytics is solid —**
@@ -98,12 +98,13 @@ Specs come in two axes. **Capability specs** = what the product can do. **Platfo
 - There is **no single "data-layer spec."** Per-capability ingestion lives inside each capability spec (returns→NAV, benchmarks→TRI/rf, personal→CAS, holdings→AMFI); only universe scale-out is its own spec (`spec-scale`). One combined data spec would recreate the coupling the seam prevents.
 
 **Storage**
-- **OLAP analytical store:** raw NAV lands in GCS → partitioned parquet on GCS as source of truth → DuckDB as a stateless query engine. NAV is the raw base; returns/metrics are a derived, materialised layer. Analytics read stored NAV, **never mftool at read time**.
+- **OLAP analytical store:** raw NAV lands in GCS → consolidated sorted parquet on GCS as source of truth (single file per dataset, amfi_code as an ordinary column, rows sorted (amfi_code, date), row-group pruning serves per-fund reads) → DuckDB as a stateless query engine. NAV is the raw base; returns/metrics are a derived, materialised layer. Analytics read stored NAV, **never mftool at read time**.
 - **Step 0 runs on local parquet behind a single `DataAccess` read seam; GCS swaps in at step 4** by repointing the seam (local path → `gs://`). No other module reads parquet paths directly. NAV stored as `decimal128` (DuckDB `DECIMAL(18,6)`), round-tripping without a DOUBLE cast.
+- **Two reads on the seam:** `load_nav_series` (per-fund, Decimal, path of record) and `load_nav_panel` (bulk Arrow, decimal128, path of scale for panel materialisation).
 - **Single-writer pattern:** a scheduled ingestion Job writes; read-only query instances pick up refreshed parquet (Cloud Run autoscaling can't share a writable DuckDB file).
 - **Daily update:** Cloud Run Job, business days, after AMFI publishes; **upsert keyed `(code, date)`** (absorbs revisions), short lookback for late-publishing funds, holiday no-op, staleness alarm.
 - **OLTP store (Postgres):** agent checkpoints, accounts, query logs — enters at Layer 2 / step 8, not before.
-- **Return materialisation:** NAVs and reconciled trailing metrics as `decimal128`/Decimal; **monthly return series stored as `float64`** for factor/regression analytics; daily returns derived on demand from stored daily NAV. The monthly panel stores completed months only and is immutable once written; the current in-progress month is derived on demand, never stored. Provenance stamp: each scheme's panel carries a single hash over its month-end NAV inputs + the code/convention version; a hash mismatch triggers a full recompute of that scheme's panel (one regeneration job). Daily NAV appends don't feed a completed month, so they don't trip the stamp.
+- **Return materialisation:** NAVs and reconciled trailing metrics as `decimal128`/Decimal; daily returns derived on demand from stored daily NAV. At fixture scale the monthly ReturnSeries is derived on demand — `to_returns(nav.month_end())`, cached per Investment — never persisted. Panel persistence (completed months only, immutable float64 parquet) and the provenance stamp (per-scheme hash over month-end NAV inputs + code/convention version, full recompute on mismatch) are owned by `spec-scale`. The current in-progress month is derived on demand, never stored; daily NAV appends don't feed a completed month, so they don't trip the stamp.
 
 **Reporting**
 - **Excel/CSV exports and factsheet links are one-directional review surfaces** for eyeballing — never authoritative, never read back into the pipeline. Stored parquet, computed metrics, and recorded fixtures are the source of truth. Excel display: NAV 4dp, returns as % 2dp; failures highlighted; metadata tab carries the amfi_code → isin → option/plan → factsheet provenance.
