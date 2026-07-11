@@ -33,6 +33,12 @@ class NavRecord:
     nav: Decimal
 
 
+def fetch_scheme_codes() -> list[str]:
+    """Return sorted, de-duplicated AMFI scheme codes via mftool."""
+    mf = Mftool()
+    return sorted({str(k) for k in mf.get_scheme_codes()})
+
+
 def fetch_nav_history(amfi_code: str) -> dict[str, Any] | None:
     """Call mftool and return its raw response dict, or None if not found.
 
