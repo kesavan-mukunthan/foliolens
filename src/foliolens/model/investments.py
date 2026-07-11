@@ -12,11 +12,13 @@ No I/O here. All concrete types are frozen dataclasses.
 from __future__ import annotations
 
 from dataclasses import dataclass
+from functools import cached_property
 from typing import Protocol
 
 from .holdings import Holding
 from .sources import PricedSource, ReturnSource
 from .value_objects import Cashflow, NavSeries, ReturnSeries
+from ..returns.convert import to_returns
 
 
 class Investment(Protocol):
@@ -67,9 +69,9 @@ class ShareClass:
 
     # --- Investment protocol surface ---
 
-    @property
+    @cached_property
     def returns(self) -> ReturnSeries:
-        raise NotImplementedError
+        return to_returns(self.source.nav.month_end())
 
 
 @dataclass(frozen=True)
@@ -100,7 +102,7 @@ class Fund:
 
     @property
     def returns(self) -> ReturnSeries:
-        raise NotImplementedError
+        return self.representative.returns
 
 
 # ---------------------------------------------------------------------------
