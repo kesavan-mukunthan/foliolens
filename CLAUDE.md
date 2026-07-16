@@ -38,6 +38,14 @@ Auto-loaded each session. These are the standing correctness laws of the analyti
 - The same stored inputs must produce an identical validation report across runs.
 - **IIMA factor library is not licensed for redistribution** (derived from CMIE Prowess). Use as a computation input with citation (the 2013 working paper); never republish the factor or rf series as data. Re-check on any external-exposure decision — same discipline as benchmark TRI and survivorship-free universe sourcing.
 
+## LLM-output verification (narrative layers)
+Numeric layers gate on tests; narrative layers gate on the equivalent. Pipeline is **compute → write → verify**, verifier authorised to block claims. *Carve-out: these laws have no executable test until spec-nl exists; they bind design and review now, and become tested invariants when the NL layer lands.*
+- **Provenance tag on every claim:** `computed` (formula stated, reproducible) / `quoted` (source + date) / `inferred` (engine hypothesis, labelled).
+- **Reconciliation invariant:** any narrative decomposition must partition (each holding in exactly one bucket, or fractional weights summing to 1) and reconcile to an accounting identity with an explicit unexplained-residual row.
+- **Cross-section consistency pass** before render: same fund, no contradictory readings (beta vs vols, counts, tone vs risk labels).
+- **Uncertainty attaches to numbers or decimals are dropped** — the alpha t-stat rule in Analytics conventions is the first instance of this general law.
+- **Derived-figure rule:** define it, reproduce it, or delete it.
+
 ## Validation
 - Three-way: own implementation vs a library oracle (ffn primary; empyrical-reloaded optional) vs the published figure.
 - **Periodicity is declared explicitly** to the oracle (daily vs monthly). Undeclared periodicity silently mis-annualises.

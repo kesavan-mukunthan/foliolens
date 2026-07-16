@@ -39,7 +39,7 @@ Specs come in two axes. **Capability specs** = what the product can do. **Platfo
 
 **Phase A — analytical core (local, on fixtures)**
 - `spec-returns` — NAV→returns, TWR/SEBI, three-way validation. **Engine + model + DataAccess built; oracle/reconcile/report/cli pending.**
-- `spec-analytics` ‖ `spec-benchmarks` — *parallel.* Risk/risk-adjusted metrics over `ReturnSeries`; rf + benchmark-TRI ingestion + fund→benchmark mapping. Analytics gates on **own-vs-oracle**, not the published reconciliation, which is what lets it run beside return validation. A disposable HTML+Plotly renderer is the tail of `spec-analytics`.
+- `spec-analytics` ‖ `spec-benchmarks` — *parallel.* Risk/risk-adjusted metrics over `ReturnSeries`; rf + benchmark-TRI ingestion + fund→benchmark mapping. Analytics gates on **own-vs-oracle**, not the published reconciliation, which is what lets it run beside return validation. A disposable renderer (PDF output for the fund-dossier milestone) is the tail of `spec-analytics`. **Benchmark data sourcing (Nifty 500 TRI + constituent list) is pulled forward into the data-acquisition track below — spec-benchmarks consumes it rather than sourcing it later.**
 
 **— Platform-phase boundary: opens once analytics is solid —**
 
@@ -50,12 +50,12 @@ Specs come in two axes. **Capability specs** = what the product can do. **Platfo
 **Phase C — capabilities on the served platform** *(order dependency-driven, not locked)*
 - `spec-personal` — **distinct product line (Layer 2).** CAS→ledger→`HeldSource`→MWR/TWR; **realised-gain/tax last** within the line. Needs analytics + CAS, **not** the universe, so it can run parallel to scale. Reuses the shared analytics substrate — additive, not a refactor.
 - `spec-screener`, `spec-recommender` — universe features (Layer 1); need `spec-scale`.
-- `spec-monitor` — personal + universe-relative alerts.
-- `spec-holdings` — DAG, look-through, attribution.
-- `spec-factor` — returns-based Carhart (unblocked, IIMA); holdings-based Brinson (after holdings + security master + PIT characteristics).
+- `spec-monitor` — personal + universe-relative alerts; linked position↔thesis↔prediction↔event↔trade schema with thesis states and PASS/FAIL/PENDING/VOID prediction resolution — see `docs/dossier-design-notes-2026-07.md` §5.4.
+- `spec-holdings` — DAG, look-through, attribution; plus holdings time-series analytics — trade event studies, active-share/concentration trajectories, endogenous-benchmark check, return gap (Kacperczyk-Sialm-Zheng 2008, needs NAV + holdings), thesis-stability half-life — see `docs/dossier-design-notes-2026-07.md` §5.2.
+- `spec-factor` — returns-based Carhart (unblocked, IIMA) + returns-based style analysis (Sharpe 1992, constrained regression on investable NSE indices; complements Carhart, covers its equity-only boundary); holdings-based Brinson (after holdings + security master + PIT characteristics).
 - `spec-nl`, `spec-construct`, `spec-finance` — NL/RAG interface; portfolio construction; personal-finance integration.
 
-**Background track (not a spec):** holdings forward-append job + security master + NSE characteristics — runs alongside so data accumulates.
+**Data-acquisition track (promoted to active, kickoff scheduled):** runs unattended alongside the build so time-sensitive data accumulates. In priority order: (1) bhavcopy daily backfill — prices, traded value, delivery % (UDiFF format post Jul-2024; handle the format break); (2) holdings forward-append job + AMFI historical-depth probe; (3) security master (NSDL + NSE symbol-ISIN map); (4) benchmark sourcing — Nifty 500 TRI series + constituent list (free from NSE; free-float *weights* are licensed — see Open Questions); (5) promoter-group taxonomy + manager-tenure reference tables (seeded from shareholding-pattern disclosures; manual-heavy, trails the jobs). Immediate milestone this track serves: a fund-dossier PDF over the flexi-cap category (positioning profile, concentration/ENB, DTL, family roll-up, NAV battery) — capture is universe-wide, analytics scoped to flexi cap first.
 
 **Old→new map:** step-0→`spec-returns`; new→`spec-analytics`,`spec-benchmarks`; steps 1–2→`spec-personal` (personal metrics just reuse `spec-analytics`); step-3→`spec-monitor`+platform; step-4→`spec-scale`; step-5→`spec-monitor`; step-6→`spec-screener`; step-7→`spec-recommender`; step-8→`spec-nl`; step-9→`spec-factor`; step-10→`spec-construct`; step-11→`spec-finance`.
 
@@ -69,6 +69,15 @@ Specs come in two axes. **Capability specs** = what the product can do. **Platfo
 - **Personal portfolio is a distinct product line** built after analytics; reuses the analytics layer; realised-gain/tax is the last module within it; the ledger is lot-grain from the first transaction.
 - **Analytics are free functions over `ReturnSeries`**, not methods on data classes or `ReturnSource` — see the `spec-analytics §0` refactor.
 - Every build step still gates on a green test suite.
+
+**Milestone re-order (Jul 2026).** The fund dossier — FolioLens's per-fund analytical PDF, scoped in `docs/dossier-design-notes-2026-07.md` — is the near-term concrete target: data-acquisition track promoted ahead of Phase B; PDF render replaces the HTML renderer as v1 serving; spec-api/spec-ui deferred until after the PDF milestone. Selection/methodology work continues in parallel — the dossier is the monitoring surface, not the product.
+
+**Framing (from the design notes, §5.7)**
+- Separate **positioning analysis** (what the fund is) from **skill evaluation** (how it has done); the latter carries the higher evidentiary standard.
+- Hold/buy/sell share one scoring engine + a friction overlay (tax, exit load) + a change-detection overlay (fire on change vs hire-time thesis, per Goyal–Wahal — never on raw performance).
+- Category prior first: expected alpha starts at the SPIVA India category base rate net of fees, not at zero.
+- Every percentage states its denominator; every comparison names its comparator.
+- LLM groupings are presentation-layer only, over a deterministic layer that forces partition, reconciliation, and persistence.
 
 **Data model**
 - **Two-level schema: Fund and ShareClass.** Fund = the strategy (one portfolio, one benchmark; holdings and category attach here). ShareClass = one AMFI code (`amfi_code`), carrying plan × option, NAV, expense ratio, ISIN. Regular/direct handling is a **share-class pairing under one Fund** — pair regular-growth with direct-growth to compute expense drag and breakeven (a taxable event; LTCG with 31-Jan-2018 grandfathering must be factored). Fund grouping is derived by parsing names/ISINs (fragile; tested, with a manual-override hook).
@@ -127,7 +136,9 @@ Specs come in two axes. **Capability specs** = what the product can do. **Platfo
 
 None of the following come from mftool/AMFI:
 
-- **Expense ratio** — needed for the step-3 regular/direct breakeven. **Sequencing conflict:** source separately before step 3, or descope breakeven from the first deploy. *Needs a decision.*
+- **Expense ratio** — **resolved: source early.** Fees are the only zero-variance input; fee-per-unit-active-share is a headline selection metric, and the regular/direct breakeven needs it. Sourcing mechanism TBD (AMC disclosures / aggregator verification).
+- **Stock daily price/return series** — bhavcopy (NSE archives; UDiFF format post Jul-2024). Required for ENB/PCA (with Ledoit-Wolf shrinkage), trade event studies, and DTL (traded value). Delivery % from NSE's delivery report. Optional: ADV percentile series (20th-percentile daily traded value) for conservative DTL.
+- **Promoter-group taxonomy + manager-tenure tables** — reference tables per `docs/dossier-design-notes-2026-07.md` §5.3; seeded from quarterly shareholding-pattern disclosures and AMC records; versioned, manual-override, quarterly diff-and-flag.
 - **Holdings** — two distinct problems with different effort and timelines:
   - *Forward append (start now, parallel to main build):* AMFI mandates monthly portfolio disclosure within 30 days of month-end; parseable from AMFI's disclosure page. Implement as a scheduled Cloud Run Job alongside the NAV ingestion job. Storage: parquet on GCS partitioned by `fund_code/year/month`; columns: `fund_code`, `as_of_date` (portfolio date), `disclosure_date` (publication date), `isin`, `security_name`, `asset_type`, `market_value_cr`, `pct_of_nav`, `quantity`, `source_url`.
   - *Historical backfill (assess before building):* Depth of machine-readable AMFI history is unknown. AMC websites are inconsistent (PDF/HTML/XLS varies by fund house and vintage). Dead/merged fund holdings are unlikely to be archived — the survivorship-bias problem is worst here. **Do not build a backfill scraper without first checking AMFI portal depth and verifying mstarpy India coverage and terms.**
@@ -177,7 +188,8 @@ None of the following come from mftool/AMFI:
 **Still open**
 - **IIMA factor/rf library redistribution** — **not licensed for redistribution** (CMIE Prowess derived); fine as a computation input with citation, but get written permission before any external exposure of the factor or rf series.
 - **Platform-phase first-deploy scope** — curated set vs `spec-scale`; decide when Phase B opens.
-- **Expense-ratio sourcing** — the step-3 sequencing conflict above. *Decision needed.*
+- **Benchmark free-float weights** — TRI series and the constituent *list* are free; constituent *weights* are NSE Indices licensed data, and active share / family-roll-up-vs-bench / all fund-vs-bench tables need weights. Candidate approximation: bhavcopy market cap × free-float factors — factor sourcing unverified. Resolve before the fund-dossier PDF milestone.
+- **Prediction anchoring corpus** — spec-monitor's registry anchors on manager-stated views, which presumes the date-versioned document corpus (spec-nl's RAG substrate). Sequencing dependency to resolve when spec-monitor is scoped.
 - **Deployment checkpoint scope** — exactly what is live after step 3 vs step 7.
 - **Time estimates per step** — step 0 estimated at ≈8 × 45-min sessions; remaining steps unestimated.
 - **NL interface** — built incrementally across earlier steps, or a distinct phase (currently leaning distinct, step 8).
