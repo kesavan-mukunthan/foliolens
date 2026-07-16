@@ -30,6 +30,8 @@ Auto-loaded each session. These are the standing correctness laws of the analyti
 - Rolling returns: monthly step, 1/3/5y windows. A window longer than history emits no point — an empty young-fund panel is correct, not a bug.
 - Benchmark return-variant (TRI vs PRI) is part of benchmark identity. Never PRI for any relative metric. fund→benchmark is a stored default, overridable.
 - Analytics acceptance = own-vs-oracle on a frozen fixture `ReturnSeries` — never published or live. (The return engine keeps the three-way incl. published; analytics stop at own-vs-oracle.)
+- Tail risk: historical VaR and CVaR (expected shortfall) at 95%, computed on daily returns derived via `.source` (same route as drawdown); reported per-period, never annualised. Parametric/Cornish-Fisher variants are out of scope until a need is demonstrated.
+- Any alpha-like quantity (Jensen's alpha, factor alpha, active return presented as skill) carries its t-stat and estimation window in the same result object. A point estimate without uncertainty is an invalid artifact.
 
 ## Source of truth & determinism
 - Analytics read **stored** NAV only. Never call mftool (or any live source) at read/compute time. Ingestion writes; analysis reads stored parquet.
