@@ -9,6 +9,7 @@ After shards are present, consolidate() reads them all and calls land()
 to produce data_dir/nav.parquet.
 
 CLI: python -m foliolens.ingest.universe --data-dir PATH [--consolidate]
+     python -m foliolens.ingest.universe --data-dir PATH --shard i/N  (parallel worker)
 """
 from __future__ import annotations
 
@@ -25,6 +26,11 @@ from .mftool_client import fetch_nav_history, fetch_scheme_codes, normalise
 _LOG = logging.getLogger(__name__)
 
 _BACKOFF: tuple[float, ...] = (2.0, 8.0, 32.0)
+
+# A None response gets one cheap retry rather than the exception ladder above —
+# see the rationale in land_universe's fetch loop.
+_NONE_RETRIES = 1
+_NONE_BACKOFF_S = 2.0
 
 
 def list_scheme_codes() -> list[str]:
@@ -52,25 +58,55 @@ def _append_failed(data_dir: Path, amfi_code: str, reason: str) -> None:
         f.write(f"{amfi_code}\t{reason}\n")
 
 
+def _read_failed(data_dir: Path) -> set[str]:
+    """Codes already recorded as failed by a previous run.
+
+    Most failures are wound-up or merged schemes that AMFI's historical-NAV
+    endpoint does not serve at all, so re-attempting them costs the full retry
+    backoff to re-learn the same answer. They are part of the resume state;
+    ``retry_failed=True`` forces a fresh attempt.
+    """
+    path = data_dir / "failed_codes.txt"
+    if not path.exists():
+        return set()
+    return {
+        line.split("\t", 1)[0].strip()
+        for line in path.read_text().splitlines()
+        if line.strip()
+    }
+
+
 def land_universe(
     data_dir: Path,
     *,
     delay_s: float = 0.75,
     max_retries: int = 3,
+    shard: tuple[int, int] | None = None,
+    retry_failed: bool = False,
 ) -> None:
     """Fetch every AMFI fund NAV and write one gzipped raw shard per fund.
 
     Existing shards are skipped — re-running resumes where a prior run stopped.
     Failed codes are recorded in data_dir/failed_codes.txt. Never raises.
+
+    ``shard`` partitions the code list for parallel workers: ``(i, n)`` runs
+    worker ``i`` of ``n`` (0-indexed), taking every ``n``-th code (``codes[i::n]``).
+    Workers write disjoint shards into the same data_dir safely.
     """
     codes = list_scheme_codes()
+    if shard is not None:
+        i, n = shard
+        codes = codes[i::n]
+    already_failed: set[str] = set() if retry_failed else _read_failed(data_dir)
+    if already_failed:
+        _LOG.info("skipping %d previously-failed codes", len(already_failed))
     total = len(codes)
     done = 0
     failed = 0
 
     for amfi_code in codes:
-        shard = _shard_path(data_dir, amfi_code)
-        if shard.exists():
+        shard_path = _shard_path(data_dir, amfi_code)
+        if shard_path.exists() or amfi_code in already_failed:
             done += 1
             if done % 100 == 0:
                 _LOG.info("progress: %d/%d done, %d failed", done, total, failed)
@@ -80,15 +116,29 @@ def land_universe(
 
         raw: dict[str, Any] | None = None
         last_exc: BaseException | None = None
+        none_attempts = 0
         for attempt in range(1 + max_retries):
             try:
                 raw = fetch_nav_history(amfi_code)
                 last_exc = None
-                break
+                if raw is not None:
+                    break
+                # A None return is a stable per-code verdict, not a transient
+                # fault: AMFI's historical-NAV endpoint serves live schemes only,
+                # so wound-up and merged schemes return None on every attempt
+                # (measured: 0/10 sampled codes recovered on serial refetch days
+                # later). One cheap retry covers a genuinely flaky response; the
+                # full exception ladder would burn 42s per dead scheme, and roughly
+                # half the universe is dead.
+                none_attempts += 1
+                if none_attempts > _NONE_RETRIES:
+                    break
+                time.sleep(_NONE_BACKOFF_S)
+                continue
             except Exception as exc:
                 last_exc = exc
-                if attempt < max_retries:
-                    time.sleep(_BACKOFF[min(attempt, len(_BACKOFF) - 1)])
+            if attempt < max_retries:
+                time.sleep(_BACKOFF[min(attempt, len(_BACKOFF) - 1)])
 
         if last_exc is not None:
             _append_failed(data_dir, amfi_code, f"exception: {last_exc!r}")
@@ -97,7 +147,7 @@ def land_universe(
             _append_failed(data_dir, amfi_code, "mftool returned None")
             failed += 1
         else:
-            _write_shard(shard, raw)
+            _write_shard(shard_path, raw)
 
         done += 1
         if done % 100 == 0:
@@ -133,15 +183,44 @@ def main() -> None:
     )
     parser.add_argument("--delay-s", type=float, default=0.75, metavar="SECS")
     parser.add_argument("--max-retries", type=int, default=3)
+    parser.add_argument(
+        "--shard",
+        metavar="i/N",
+        help="run worker i of N (1-based), taking every N-th code; for parallel runs",
+    )
+    parser.add_argument(
+        "--retry-failed",
+        action="store_true",
+        help="re-attempt codes in failed_codes.txt (skipped by default on resume)",
+    )
     args = parser.parse_args()
+
+    shard: tuple[int, int] | None = None
+    if args.shard is not None:
+        i_str, n_str = args.shard.split("/")
+        i, n = int(i_str), int(n_str)
+        if not (1 <= i <= n):
+            parser.error(f"--shard i/N requires 1 <= i <= N, got {args.shard}")
+        shard = (i - 1, n)  # CLI is 1-based; land_universe is 0-based
 
     logging.basicConfig(
         level=logging.INFO, format="%(asctime)s %(levelname)s %(message)s"
     )
-    land_universe(args.data_dir, delay_s=args.delay_s, max_retries=args.max_retries)
+    land_universe(
+        args.data_dir,
+        delay_s=args.delay_s,
+        max_retries=args.max_retries,
+        shard=shard,
+        retry_failed=args.retry_failed,
+    )
     if args.consolidate:
-        out = consolidate(args.data_dir)
-        print(f"consolidated → {out}")
+        if shard is not None:
+            # Consolidation must see every worker's shards — run it once, separately,
+            # after all workers finish, not inside a single sharded worker.
+            _LOG.info("--shard set: skipping consolidate; run it once after all workers finish")
+        else:
+            out = consolidate(args.data_dir)
+            print(f"consolidated → {out}")
 
 
 if __name__ == "__main__":

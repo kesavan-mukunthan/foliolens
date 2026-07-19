@@ -89,6 +89,118 @@ def test_none_response_appended_to_failed_codes(
     assert "None" in text
 
 
+def test_none_response_is_retried(
+    tmp_path: Path, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    """A None return gets one cheap retry — not zero, and not the full ladder.
+
+    Zero retries loses genuinely flaky responses; the full exception ladder
+    costs 42s per wound-up scheme, and roughly half the universe is wound up.
+    """
+    calls: list[str] = []
+
+    def _always_none(code: str) -> None:
+        calls.append(code)
+        return None
+
+    monkeypatch.setattr("foliolens.ingest.universe.list_scheme_codes", lambda: ["103340"])
+    monkeypatch.setattr("foliolens.ingest.universe.fetch_nav_history", _always_none)
+    monkeypatch.setattr("time.sleep", lambda _: None)
+
+    land_universe(tmp_path, max_retries=3)
+
+    assert len(calls) == 2, f"expected 1 initial + 1 retry, got {len(calls)}"
+
+
+def test_transient_none_then_success_is_landed(
+    tmp_path: Path, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    """A fund that returns None once and then succeeds lands, and is not failed."""
+    attempts = iter([None, {"data": [{"date": "01-01-2020", "nav": "10.0"}]}])
+
+    monkeypatch.setattr("foliolens.ingest.universe.list_scheme_codes", lambda: ["103340"])
+    monkeypatch.setattr(
+        "foliolens.ingest.universe.fetch_nav_history", lambda _: next(attempts)
+    )
+    monkeypatch.setattr("time.sleep", lambda _: None)
+
+    land_universe(tmp_path, max_retries=3)
+
+    assert (tmp_path / "raw" / "103340.json.gz").exists()
+    assert not (tmp_path / "failed_codes.txt").exists()
+
+
+def test_previously_failed_codes_are_skipped_on_resume(
+    tmp_path: Path, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    """failed_codes.txt is resume state: those codes are not re-fetched."""
+    (tmp_path / "failed_codes.txt").write_text("103340\tmftool returned None\n")
+    calls: list[str] = []
+
+    monkeypatch.setattr("foliolens.ingest.universe.list_scheme_codes", lambda: ["103340"])
+    monkeypatch.setattr(
+        "foliolens.ingest.universe.fetch_nav_history",
+        lambda c: calls.append(c) or None,
+    )
+    monkeypatch.setattr("time.sleep", lambda _: None)
+
+    land_universe(tmp_path)
+
+    assert calls == [], "previously-failed code should not be re-fetched"
+
+
+def test_retry_failed_forces_reattempt(
+    tmp_path: Path, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    """retry_failed=True overrides the skip, so a recovered scheme can land."""
+    (tmp_path / "failed_codes.txt").write_text("103340\tmftool returned None\n")
+
+    monkeypatch.setattr("foliolens.ingest.universe.list_scheme_codes", lambda: ["103340"])
+    monkeypatch.setattr(
+        "foliolens.ingest.universe.fetch_nav_history",
+        lambda _: {"data": [{"date": "01-01-2020", "nav": "10.0"}]},
+    )
+    monkeypatch.setattr("time.sleep", lambda _: None)
+
+    land_universe(tmp_path, retry_failed=True)
+
+    assert (tmp_path / "raw" / "103340.json.gz").exists()
+
+
+# ---------------------------------------------------------------------------
+# shard partition — worker i of N takes every N-th code, disjoint coverage
+# ---------------------------------------------------------------------------
+
+
+def test_shard_partitions_disjoint_and_complete(
+    tmp_path: Path, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    all_codes = [str(c) for c in range(100, 110)]  # 10 codes
+    monkeypatch.setattr(
+        "foliolens.ingest.universe.list_scheme_codes", lambda: all_codes
+    )
+    monkeypatch.setattr("time.sleep", lambda _: None)
+
+    fetched: dict[int, list[str]] = {}
+
+    def _run_worker(worker: int) -> None:
+        seen: list[str] = []
+        monkeypatch.setattr(
+            "foliolens.ingest.universe.fetch_nav_history",
+            lambda code: seen.append(code) or {"data": []},
+        )
+        land_universe(tmp_path, shard=(worker, 4))
+        fetched[worker] = seen
+
+    for w in range(4):
+        _run_worker(w)
+
+    covered = [c for w in range(4) for c in fetched[w]]
+    # Disjoint (no code fetched twice) and complete (every code covered once).
+    assert sorted(covered) == sorted(all_codes)
+    assert len(covered) == len(set(covered))
+
+
 # ---------------------------------------------------------------------------
 # consolidate — two hand-built shards → sorted parquet
 # ---------------------------------------------------------------------------
