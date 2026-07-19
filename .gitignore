@@ -1,7 +1,7 @@
 .venv/
 __pycache__/
 *.pyc
-data/raw/
+data/
 outputs/
 *.duckdb
 .pytest_cache/
