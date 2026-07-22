@@ -41,6 +41,40 @@ def _month_end(year: int, month: int) -> date:
     return date(year, month, monthrange(year, month)[1])
 
 
+def month_end_dates(
+    n: int, start_year: int = 2023, start_month: int = 1
+) -> tuple[date, ...]:
+    """``n`` consecutive calendar month-end dates from ``start_year/start_month``."""
+    return tuple(
+        _month_end(
+            start_year + (start_month - 1 + i) // 12,
+            (start_month - 1 + i) % 12 + 1,
+        )
+        for i in range(n)
+    )
+
+
+def returns_series(
+    values: object, start_year: int = 2023, start_month: int = 1
+) -> ReturnSeries:
+    """Build a monthly ``ReturnSeries`` from ``values`` on consecutive month-ends."""
+    arr = np.asarray(values, dtype=np.float64)
+    return ReturnSeries(
+        dates=month_end_dates(len(arr), start_year, start_month),
+        values=arr,
+    )
+
+
+def fixed_investment(
+    values: object, start_year: int = 2023, start_month: int = 1, id: str = "test"
+) -> FixedReturnsInvestment:
+    """A ``FixedReturnsInvestment`` wrapping a monthly ``ReturnSeries``."""
+    return FixedReturnsInvestment(
+        id=id,
+        returns_series=returns_series(values, start_year, start_month),
+    )
+
+
 def rf_investment() -> FixedReturnsInvestment:
     """Risk-free fixture: 36 monthly period-end dates, constant 6% p.a. monthly return."""
     monthly_r = (1.06) ** (1 / 12) - 1
