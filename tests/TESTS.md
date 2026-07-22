@@ -39,6 +39,28 @@ All fixtures load from `fixtures/` only. **No test calls mftool or any live sour
 - `test_roundtrip_ratios` — `to_index(to_returns(nav))` reproduces periodic return ratios ≤1e-6; asserts on ratios, never NAV levels.
 - `test_series_chaining` — compounding sub-period returns on `ReturnSeries` matches the cumulative return.
 
+## analytics (spec-analytics §2 — pure core, own-vs-oracle on fixtures)
+
+### test_series_ops.py
+- `align` — inner-join two `ReturnSeries` on dates: full/partial overlap, rf longer than fund (overlap only), empty overlap → empty arrays, ascending order preserved.
+- `between` — inclusive searchsorted window: bound handling, wide bounds, single point, window outside history → empty, `start > end` raises, base carried through.
+
+### test_metrics_unit.py — closed-form on `FixedReturnsInvestment` (hand-computed)
+- `period_return_abs` — `Π(1+r)−1` over a `between` slice (full/3M/1M windows; empty window raises).
+- `volatility` — `std(ddof=1) × √12`.
+- `downside_deviation` — `√(mean(min(excess,0)²)) × √12`, MAR = rf series.
+- `sharpe` — `mean(excess)/std(excess,ddof=1) × √12`.
+- `sortino` — `(mean(excess)×12)/downside_deviation`, MAR = rf.
+- `calmar` — annualised return `/ |max drawdown|` over the return series; no-drawdown → NaN.
+
+### test_metrics_oracle.py — own↔oracle relative ≤ 1e-6 (empyrical, periodicity monthly)
+- `volatility`, `calmar`, `downside_deviation`, `sharpe`, `sortino` vs empyrical on a 36-month fixture; rf passed as the aligned per-period series; rf-longer-than-fund and all-negative cases match.
+
+### test_metrics_edge.py
+- Empty overlap after `align` → `sharpe`/`sortino`/`downside_deviation` fail loud.
+- Single-period series → `volatility`/`sharpe` raise; `period_return_abs` and `calmar` still defined.
+- All-negative returns → Sortino/Calmar closed-form, downside deviation strictly positive.
+
 ## step00/
 
 ### test_reconciliation.py — parametrised over funds × periods from fixtures
