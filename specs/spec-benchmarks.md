@@ -112,7 +112,7 @@ peer universe (§7) consume them through existing contracts:
 ## Executor guards
 - Missing mapping fails loud; never default a benchmark.
 - No Decimal→float outside `returns/convert.py` except the documented rf entry.
-- No scraping code; parsers take local files.
+- Parsers take local files. One-time locally-run acquisition aids are permitted outside the pipeline (see SCOPE acquisition-aid amendment); no scraping in pipeline code, no scheduled/CI fetching.
 - Name-parse ambiguity → NULL + flag, never a guess.
 
 ## Dependencies

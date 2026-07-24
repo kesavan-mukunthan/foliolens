@@ -26,7 +26,7 @@ Analytics acceptance is **own-vs-oracle on a frozen fixture `ReturnSeries`** —
 
 ## Out of scope — do not build
 - **Benchmark-relative metrics** (excess return over periods, beta, Jensen's alpha, Treynor, R², tracking error, information ratio, up/down capture) — define signatures as stubs; implement at **§6**, gated on spec-benchmarks delivering rf + TRI. Do not fabricate a benchmark series to unblock.
-- **Renderer** (static HTML + Plotly over the artifact) — a thin tail after §5; small, disposable. Not the product UI (spec-ui).
+- **Renderer** — superseded: rendering is owned by specs/spec-flexicap-page.md (pre-rendered SVG, no Plotly). spec-analytics ends at the metrics artifact.
 - **Factor/regression alpha** (Carhart) — spec-factor; depends on the factor library + survivorship-free universe.
 - **rf Investment data sourcing** — owned by spec-benchmarks. This spec consumes the rf Investment; it does not source it. (If spec-benchmarks lags, §2 can run against a frozen fixture rf series.)
 

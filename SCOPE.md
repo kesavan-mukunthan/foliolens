@@ -39,7 +39,7 @@ Specs come in two axes. **Capability specs** = what the product can do. **Platfo
 
 **Phase A — analytical core (local, on fixtures)**
 - `spec-returns` — NAV→returns, TWR/SEBI, three-way validation. **Engine + model + DataAccess built; oracle/reconcile/report/cli pending.**
-- `spec-analytics` ‖ `spec-benchmarks` — *parallel.* Risk/risk-adjusted metrics over `ReturnSeries`; rf + benchmark-TRI ingestion + fund→benchmark mapping + scheme master (universe metadata derived from backfill shards). Analytics gates on **own-vs-oracle**, not the published reconciliation, which is what lets it run beside return validation. A disposable renderer (PDF output for the fund-dossier milestone) is the tail of `spec-analytics`. **Benchmark data sourcing (Nifty 500 TRI + constituent list) is pulled forward into the data-acquisition track below — spec-benchmarks consumes it rather than sourcing it later.**
+- `spec-analytics` ‖ `spec-benchmarks` — *parallel.* Risk/risk-adjusted metrics over `ReturnSeries`; rf + benchmark-TRI ingestion + fund→benchmark mapping + scheme master (universe metadata derived from backfill shards). Analytics gates on **own-vs-oracle**, not the published reconciliation, which is what lets it run beside return validation. Rendering is owned by specs/spec-flexicap-page.md (static HTML + print-CSS PDF over the metrics artifact); the renderer tail formerly noted here is superseded. **Benchmark data sourcing (Nifty 500 TRI + constituent list) is pulled forward into the data-acquisition track below — spec-benchmarks consumes it rather than sourcing it later.**
 
 **— Platform-phase boundary: opens once analytics is solid —**
 
@@ -70,7 +70,9 @@ Specs come in two axes. **Capability specs** = what the product can do. **Platfo
 - **Analytics are free functions over `ReturnSeries`**, not methods on data classes or `ReturnSource` — see the `spec-analytics §0` refactor.
 - Every build step still gates on a green test suite.
 
-**Milestone re-order (Jul 2026).** The fund dossier — FolioLens's per-fund analytical PDF, scoped in `docs/dossier-design-notes-2026-07.md` — is the near-term concrete target: data-acquisition track promoted ahead of Phase B; PDF render replaces the HTML renderer as v1 serving; spec-api/spec-ui deferred until after the PDF milestone. Selection/methodology work continues in parallel — the dossier is the monitoring surface, not the product.
+**Milestone re-order (Jul 2026).** The fund dossier — FolioLens's per-fund analytical PDF, scoped in `docs/dossier-design-notes-2026-07.md` — is the near-term concrete target: data-acquisition track promoted ahead of Phase B; v1 serving is a statically generated flexicap site (universe page + per-fund pages) with per-fund PDFs via print-CSS — see specs/spec-flexicap-page.md; the richer fund-dossier PDF remains a later deliverable; spec-api/spec-ui deferred until after this milestone. Selection/methodology work continues in parallel — the dossier is the monitoring surface, not the product.
+
+**Acquisition-aid amendment (Jul 2026).** One-time, locally-run fetch scripts (incl. browser-extension-driven downloads) are permitted as acquisition aids for benchmark/factor source files. No scheduled or CI-invoked fetching of index or factor data. The pipeline contract is unchanged: parsers take local files. IIM-A factor data stays out of any repo and any automation until redistribution terms are resolved.
 
 **Framing (from the design notes, §5.7)**
 - Separate **positioning analysis** (what the fund is) from **skill evaluation** (how it has done); the latter carries the higher evidentiary standard.
