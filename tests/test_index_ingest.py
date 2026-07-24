@@ -23,11 +23,14 @@ from foliolens.ingest.index_normalise import (
 from foliolens.ingest.land import land_index
 from foliolens.model.investments import Benchmark, Investment, benchmark_from_index
 
+# Mirrors the confirmed niftyindices export: "Date" (not "Index Date"), the gross
+# "Total Returns Index" column, and a trailing net-TRI column that must be ignored
+# (with "-" in early rows).
 _NIFTY_CSV = (
-    "Index Name,Index Date,Total Returns Index\n"
-    'NIFTY 500,01 Jan 2020,"12,345.67"\n'
-    'NIFTY 500,31 Jan 2020,"12,400.00"\n'
-    'NIFTY 500,29 Feb 2020,"12,500.50"\n'
+    "Index Name,Date,Total Returns Index,Net Total Return Index\n"
+    'NIFTY 500,01 Jan 2020,"12,345.67",-\n'
+    'NIFTY 500,31 Jan 2020,"12,400.00",11800.00\n'
+    'NIFTY 500,29 Feb 2020,"12,500.50",11890.00\n'
     "\n"  # trailing blank line — must be skipped, not error
 )
 

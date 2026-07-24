@@ -13,10 +13,12 @@ fail loud on a schema they do not recognise rather than silently mis-parse.
 EXPECTED FILE SHAPES (verify against the real downloads; adjust here if they
 differ — a column-name/date-format change is localised to this module):
 
-- niftyindices.com TRI historical export:
-    Index Name,Index Date,Total Returns Index
-    NIFTY 500,01 Jan 2020,"12,345.67"
-  level column = "Total Returns Index"; date = "Index Date" (DD Mon YYYY).
+- niftyindices.com TRI historical export (confirmed against a NIFTY 500 pull):
+    Index Name,Date,Total Returns Index,Net Total Return Index
+    NIFTY 500,01 Jan 1995,1000.00,-
+  level column = "Total Returns Index" (the GROSS TRI — spec basis); the trailing
+  "Net Total Return Index" (net-of-tax, "-" in early rows) is ignored. Date column
+  is "Date" (older exports used "Index Date"; both accepted), format DD Mon YYYY.
 
 - bseindia.com index historical export (TRI variant selected explicitly):
     Date,Open,High,Low,Close
@@ -85,7 +87,7 @@ def _parse_two_column(
     path: Path,
     index_code: str,
     *,
-    date_col: str,
+    date_cols: tuple[str, ...],
     level_col: str,
     date_formats: tuple[str, ...],
     source: str,
@@ -95,7 +97,15 @@ def _parse_two_column(
         if reader.fieldnames is None:
             raise ValueError(f"{source}: empty file {path}")
         header = [f.strip() for f in reader.fieldnames]
-        _require_columns(header, (date_col, level_col), source)
+        _require_columns(header, (level_col,), source)
+        # The date header varies across exports ("Date" vs "Index Date"); accept
+        # the first candidate present, fail loud if none is.
+        present = {h.strip() for h in header}
+        date_col = next((c for c in date_cols if c in present), None)
+        if date_col is None:
+            raise ValueError(
+                f"{source}: no date column among {list(date_cols)}; saw {header}"
+            )
         # Re-key rows on stripped headers so trailing-space column names still match.
         stripped = {orig: orig.strip() for orig in reader.fieldnames}
         records: list[IndexRecord] = []
@@ -125,7 +135,7 @@ def parse_niftyindices_tri(path: Path | str, index_code: str) -> list[IndexRecor
     return _parse_two_column(
         Path(path),
         index_code,
-        date_col="Index Date",
+        date_cols=("Date", "Index Date"),
         level_col="Total Returns Index",
         date_formats=_NIFTY_DATE_FORMATS,
         source="niftyindices",
@@ -141,7 +151,7 @@ def parse_bse_tri(path: Path | str, index_code: str) -> list[IndexRecord]:
     return _parse_two_column(
         Path(path),
         index_code,
-        date_col="Date",
+        date_cols=("Date",),
         level_col="Close",
         date_formats=_BSE_DATE_FORMATS,
         source="bse",
