@@ -1,11 +1,16 @@
-"""Unit tests for the mftool_client normaliser.
+"""Unit tests for the mftool_client normaliser and fetch semantics.
 
-No network: all tests operate on hand-built dicts passed to normalise().
-The conftest _no_network fixture guards against accidental live calls.
+No network: normalise() tests use hand-built dicts; fetch tests inject a fake
+client so no socket is touched. The conftest _no_network fixture guards against
+accidental live calls.
 """
 import datetime
 from decimal import Decimal
 
+import pytest
+import requests
+
+from foliolens.ingest import mftool_client
 from foliolens.ingest.mftool_client import normalise
 
 
@@ -77,3 +82,88 @@ def test_normalise_no_forward_fill():
     assert len(result) == 2, "only dates present in raw feed should appear"
     assert result[0].date == datetime.date(2026, 6, 13)
     assert result[1].date == datetime.date(2026, 6, 17)
+
+
+# --- fetch_nav_history: None-vs-exception semantics -------------------------
+#
+# These guard the incident this module was rewritten to fix: a transient network
+# error must NOT be swallowed into None (which the caller records as a dead
+# scheme, quarantining live funds forever). None is reserved for a successful
+# response that genuinely carries no data.
+
+
+class _FakeResponse:
+    def __init__(self, payload, *, raise_exc=None):
+        self._payload = payload
+        self._raise_exc = raise_exc
+
+    def raise_for_status(self):
+        pass
+
+    def json(self):
+        return self._payload
+
+
+class _FakeSession:
+    def __init__(self, *, payload=None, exc=None):
+        self._payload = payload
+        self._exc = exc
+
+    def get(self, url):
+        if self._exc is not None:
+            raise self._exc
+        return _FakeResponse(self._payload)
+
+
+class _FakeClient:
+    _get_scheme_url = "https://api.mfapi.in/mf/"
+
+    def __init__(self, *, payload=None, exc=None):
+        self._session = _FakeSession(payload=payload, exc=exc)
+
+
+def _install_client(monkeypatch, *, payload=None, exc=None):
+    monkeypatch.setattr(
+        mftool_client, "_get_client", lambda: _FakeClient(payload=payload, exc=exc)
+    )
+
+
+def test_fetch_returns_payload_when_data_present(monkeypatch):
+    payload = {"meta": {}, "data": [{"date": "15-06-2026", "nav": "10.0"}], "status": "SUCCESS"}
+    _install_client(monkeypatch, payload=payload)
+    assert mftool_client.fetch_nav_history(CODE) is payload
+
+
+def test_fetch_returns_none_for_empty_data(monkeypatch):
+    """HTTP 200 with no data rows = genuinely absent scheme → None."""
+    _install_client(monkeypatch, payload={"meta": {}, "data": [], "status": "SUCCESS"})
+    assert mftool_client.fetch_nav_history(CODE) is None
+
+
+def test_fetch_propagates_network_error_not_none(monkeypatch):
+    """The incident guard: a timeout must raise, never collapse to None.
+
+    A None here would be recorded as 'mftool returned None' and the fund
+    permanently quarantined as dead — which is exactly what happened to ~5000
+    live funds. The caller's retry ladder only fires on an exception.
+    """
+    _install_client(monkeypatch, exc=requests.ReadTimeout("read timed out"))
+    with pytest.raises(requests.RequestException):
+        mftool_client.fetch_nav_history(CODE)
+
+
+def test_get_client_rejects_implausibly_small_index(monkeypatch):
+    """An empty/stub scheme index means the index load failed — refuse to run,
+    rather than judge every code invalid and return None for live funds."""
+    mftool_client._client = None  # reset the module-level singleton
+
+    class _StubMftool:
+        def __init__(self):
+            self._session = _FakeSession(payload={})
+            self._scheme_codes = {"1", "2", "3"}  # far below _MIN_SCHEME_CODES
+
+    monkeypatch.setattr(mftool_client, "Mftool", _StubMftool)
+    monkeypatch.setattr(mftool_client, "_install_timeout", lambda mf: None)
+    with pytest.raises(RuntimeError, match="index loaded only"):
+        mftool_client._get_client()
+    mftool_client._client = None  # leave the singleton clean for other tests
