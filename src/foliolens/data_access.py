@@ -32,6 +32,10 @@ class DataAccess:
     def _nav_path(self) -> str:
         return str(self._root / "nav.parquet")
 
+    @property
+    def _index_path(self) -> str:
+        return str(self._root / "index_nav.parquet")
+
     def load_nav_series(self, amfi_code: str) -> NavSeries:
         """Return the full daily NAV series for one fund from parquet.
 
@@ -54,6 +58,30 @@ class DataAccess:
             pairs.append((d, nav))
 
         return NavSeries(amfi_code=amfi_code, data=tuple(pairs))
+
+    def load_index_series(self, index_code: str) -> NavSeries:
+        """Return the full daily level series for one benchmark index as a NavSeries.
+
+        NavSeries is reused for index levels (the identifier field carries
+        ``index_code``); ``.month_end()`` and ``to_returns`` apply unchanged.
+        Reads decimal128 directly; no SQL arithmetic that would cast to DOUBLE.
+        Raises ValueError if no data is found for index_code.
+        """
+        rows: list[Any] = self._con.execute(
+            "SELECT date, level FROM read_parquet(?) WHERE index_code = ? ORDER BY date",
+            [self._index_path, index_code],
+        ).fetchall()
+
+        if not rows:
+            raise ValueError(f"no index data for index_code={index_code!r}")
+
+        pairs: list[tuple[date, Decimal]] = []
+        for row in rows:
+            d = cast(date, row[0])
+            level = Decimal(str(row[1]))
+            pairs.append((d, level))
+
+        return NavSeries(amfi_code=index_code, data=tuple(pairs))
 
     def load_nav_panel(self, amfi_codes: Sequence[str] | None = None) -> pa.Table:
         """Return (amfi_code, date, nav) for many funds as an Arrow table.

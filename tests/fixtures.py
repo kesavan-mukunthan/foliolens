@@ -2,39 +2,18 @@
 from __future__ import annotations
 
 from calendar import monthrange
-from dataclasses import dataclass
 from datetime import date
 
 import numpy as np
 
-from foliolens.model.holdings import Holding
-from foliolens.model.investments import Investment
-from foliolens.model.sources import ReturnSource
+from foliolens.model.investments import SeriesInvestment
 from foliolens.model.value_objects import ReturnSeries
 
-
-@dataclass(frozen=True)
-class FixedReturnsInvestment:
-    """Frozen dataclass satisfying the Investment protocol; no NAV, no I/O."""
-
-    id: str
-    returns_series: ReturnSeries
-
-    @property
-    def returns(self) -> ReturnSeries:
-        return self.returns_series
-
-    @property
-    def benchmark(self) -> Investment | None:
-        return None
-
-    @property
-    def holdings(self) -> tuple[Holding, ...]:
-        return ()
-
-    @property
-    def source(self) -> ReturnSource:
-        raise NotImplementedError
+# The return-space Investment (id + materialised ReturnSeries, no NAV, no I/O)
+# now lives in the model as SeriesInvestment. Tests use it directly; the old
+# fixture-local name is kept as an alias so existing imports and isinstance
+# checks continue to hold.
+FixedReturnsInvestment = SeriesInvestment
 
 
 def _month_end(year: int, month: int) -> date:
