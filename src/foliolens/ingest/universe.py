@@ -123,13 +123,16 @@ def land_universe(
                 last_exc = None
                 if raw is not None:
                     break
-                # A None return is a stable per-code verdict, not a transient
-                # fault: AMFI's historical-NAV endpoint serves live schemes only,
-                # so wound-up and merged schemes return None on every attempt
-                # (measured: 0/10 sampled codes recovered on serial refetch days
-                # later). One cheap retry covers a genuinely flaky response; the
-                # full exception ladder would burn 42s per dead scheme, and roughly
-                # half the universe is dead.
+                # None now means a *validated* absent scheme: fetch_nav_history
+                # only returns None on an HTTP-200 response carrying empty data,
+                # and raises (not None) on any network/timeout fault, so a None
+                # here is a stable per-code verdict rather than swallowed flakiness.
+                # (An earlier comment claimed "roughly half the universe is dead,
+                # 0/10 recover" — that was contaminated by a client bug that turned
+                # transient failures and an empty scheme-index into blanket None
+                # verdicts; a 40/40 resample of the affected codes was fully live.)
+                # One cheap retry still covers a borderline empty-then-populated
+                # response without paying the full exception backoff ladder.
                 none_attempts += 1
                 if none_attempts > _NONE_RETRIES:
                     break
