@@ -12,6 +12,7 @@ from pathlib import Path
 import pyarrow as pa
 import pyarrow.parquet as pq
 
+from .index_normalise import IndexRecord
 from .mftool_client import NavRecord
 
 _NAV_SCHEMA = pa.schema(
@@ -19,6 +20,16 @@ _NAV_SCHEMA = pa.schema(
         pa.field("amfi_code", pa.string()),
         pa.field("date", pa.date32()),
         pa.field("nav", pa.decimal128(18, 6)),
+    ]
+)
+
+# Index levels are a separate dataset, same decimal128 pattern — never mixed into
+# fund nav.parquet (spec-benchmarks: distinct provenance, distinct file).
+_INDEX_SCHEMA = pa.schema(
+    [
+        pa.field("index_code", pa.string()),
+        pa.field("date", pa.date32()),
+        pa.field("level", pa.decimal128(18, 6)),
     ]
 )
 
@@ -49,5 +60,37 @@ def land(records: list[NavRecord], data_dir: Path) -> Path:
 
     data_dir.mkdir(parents=True, exist_ok=True)
     out_path = data_dir / "nav.parquet"
+    pq.write_table(table, out_path, row_group_size=_ROW_GROUP_SIZE)  # type: ignore[no-untyped-call]
+    return out_path
+
+
+def land_index(records: list[IndexRecord], data_dir: Path) -> Path:
+    """Write benchmark IndexRecords to data_dir/index_nav.parquet.
+
+    Sibling of ``land``: same single-file, decimal128, sorted layout, but a
+    separate dataset (index_code, date, level) — never merged into nav.parquet.
+    Rows are sorted by (index_code, date). Overwrites any existing file.
+    Returns the path of the written file.
+    """
+    if not records:
+        raise ValueError("no records to land")
+
+    ordered = sorted(records, key=lambda r: (r.index_code, r.date))
+
+    table = pa.table(
+        {
+            "index_code": pa.array(
+                [r.index_code for r in ordered], type=pa.string()
+            ),
+            "date": pa.array([r.date for r in ordered], type=pa.date32()),
+            "level": pa.array(
+                [r.level for r in ordered], type=pa.decimal128(18, 6)
+            ),
+        },
+        schema=_INDEX_SCHEMA,
+    )
+
+    data_dir.mkdir(parents=True, exist_ok=True)
+    out_path = data_dir / "index_nav.parquet"
     pq.write_table(table, out_path, row_group_size=_ROW_GROUP_SIZE)  # type: ignore[no-untyped-call]
     return out_path

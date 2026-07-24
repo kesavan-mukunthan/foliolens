@@ -105,6 +105,37 @@ class Fund:
         return self.representative.returns
 
 
+@dataclass(frozen=True)
+class SeriesInvestment:
+    """An Investment wrapping a materialised monthly ``ReturnSeries`` directly.
+
+    For return-space series that never pass through a NAV/level stage — the
+    risk-free rate (IIM-A 91-day T-bill) is the canonical case. This is the one
+    sanctioned non-NAV float entry into the model besides ``ValueIndex``: the
+    series is already float64 at birth, so ``returns/convert.py`` does not apply.
+    No source/holdings; ``source`` raises to make the absence explicit.
+    """
+
+    id: str
+    returns_series: ReturnSeries
+
+    @property
+    def returns(self) -> ReturnSeries:
+        return self.returns_series
+
+    @property
+    def benchmark(self) -> Investment | None:
+        return None
+
+    @property
+    def holdings(self) -> tuple[Holding, ...]:
+        return ()
+
+    @property
+    def source(self) -> ReturnSource:
+        raise NotImplementedError("SeriesInvestment has no ReturnSource; it is return-space")
+
+
 # ---------------------------------------------------------------------------
 # Stubs — contract is stable; logic implemented in later steps
 # ---------------------------------------------------------------------------
@@ -124,11 +155,40 @@ class Portfolio:
         raise NotImplementedError
 
 
+@dataclass(frozen=True)
 class Benchmark:
-    """Stub: priced via TRI; identical behaviour to Fund. Implemented at step 2+."""
+    """A benchmark index priced via its TRI level series (never PRI).
 
-    def __init__(self) -> None:
-        raise NotImplementedError
+    Same shape as ShareClass: a PricedSource over the index NavSeries, so
+    ``.returns`` is ``to_returns(levels.month_end())`` unchanged. ``id`` carries
+    the canonical index_code (e.g. ``NIFTY500TRI``). No holdings, no benchmark of
+    its own by default.
+    """
+
+    id: str
+    source: PricedSource
+    benchmark: Investment | None = None
+    holdings: tuple[Holding, ...] = ()
+
+    @property
+    def value_series(self) -> NavSeries:
+        return self.source.nav
+
+    @property
+    def cashflows(self) -> tuple[Cashflow, ...]:
+        return ()
+
+    @cached_property
+    def returns(self) -> ReturnSeries:
+        return to_returns(self.source.nav.month_end())
+
+
+def benchmark_from_index(levels: NavSeries) -> Benchmark:
+    """Construct a benchmark Investment from an index level NavSeries.
+
+    ``levels.amfi_code`` carries the index_code and becomes the benchmark id.
+    """
+    return Benchmark(id=levels.amfi_code, source=PricedSource(nav=levels))
 
 
 class Cash:
