@@ -2,12 +2,14 @@
 from __future__ import annotations
 
 from calendar import monthrange
-from datetime import date
+from datetime import date, timedelta
+from decimal import Decimal
 
 import numpy as np
 
-from foliolens.model.investments import SeriesInvestment
-from foliolens.model.value_objects import ReturnSeries
+from foliolens.model.investments import SeriesInvestment, ShareClass
+from foliolens.model.sources import PricedSource
+from foliolens.model.value_objects import NavSeries, ReturnSeries
 
 # The return-space Investment (id + materialised ReturnSeries, no NAV, no I/O)
 # now lives in the model as SeriesInvestment. Tests use it directly; the old
@@ -51,6 +53,36 @@ def fixed_investment(
     return FixedReturnsInvestment(
         id=id,
         returns_series=returns_series(values, start_year, start_month),
+    )
+
+
+def daily_nav(
+    values: object, start: date = date(2024, 1, 1), amfi_code: str = "888888"
+) -> NavSeries:
+    """A daily (consecutive-day) Decimal ``NavSeries`` from ``values``.
+
+    Consecutive calendar days keep the series unambiguously daily (no month-end
+    resampling): the §3 drawdown family reads the raw daily NAV so an intra-month
+    trough is captured. Values become ``Decimal`` — NAV is a figure of record.
+    """
+    data = tuple(
+        (start + timedelta(days=i), Decimal(str(v))) for i, v in enumerate(values)  # type: ignore[call-overload]
+    )
+    return NavSeries(amfi_code=amfi_code, data=data)
+
+
+def daily_shareclass(
+    values: object, start: date = date(2024, 1, 1), id: str = "SCDAILY"
+) -> ShareClass:
+    """A ``ShareClass`` priced on a daily NAV series — for the §3 daily adapters."""
+    nav = daily_nav(values, start)
+    return ShareClass(
+        id=id,
+        amfi_code=nav.amfi_code,
+        isin="INF888X01X88",
+        plan="direct",
+        option="growth",
+        source=PricedSource(nav=nav),
     )
 
 

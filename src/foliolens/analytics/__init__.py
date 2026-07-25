@@ -7,13 +7,28 @@ Decimal enters this layer. rf/benchmark are passed as return *series*, never as
 a scalar rate. Two-series metrics route through ``series_ops.align`` — never an
 ad-hoc join.
 
-§2 (this module set) is the pure core, no benchmark:
-``series_ops.align`` / ``series_ops.between`` and the metrics
-``period_return_abs``, ``volatility``, ``downside_deviation``, ``sharpe``,
-``sortino``, ``calmar``.
+§2 (pure core, no benchmark): ``series_ops.align`` / ``series_ops.between`` and
+the metrics ``period_return_abs``, ``volatility``, ``downside_deviation``,
+``sharpe``, ``sortino``, ``calmar``.
+
+§3 (daily-basis family): ``max_drawdown`` / ``drawdown`` (+ the ``Drawdown``
+episode), ``var_historical``, ``cvar`` — pure over ``ReturnSeries`` /
+``ValueIndex`` — with the ``*_of`` daily adapters that read ``investment.source``.
+Drawdown is the one family that reads daily NAV, not the monthly series.
 """
 from __future__ import annotations
 
+from .drawdown import (
+    Drawdown,
+    cvar,
+    cvar_of,
+    drawdown,
+    drawdown_of,
+    max_drawdown,
+    max_drawdown_of,
+    var_historical,
+    var_historical_of,
+)
 from .metrics import (
     calmar,
     downside_deviation,
@@ -33,4 +48,13 @@ __all__ = [
     "sharpe",
     "sortino",
     "calmar",
+    "Drawdown",
+    "max_drawdown",
+    "drawdown",
+    "var_historical",
+    "cvar",
+    "max_drawdown_of",
+    "drawdown_of",
+    "var_historical_of",
+    "cvar_of",
 ]
