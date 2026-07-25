@@ -16,6 +16,35 @@ import numpy.typing as npt
 from foliolens.model.value_objects import ReturnSeries
 
 
+def align_dated(
+    a: ReturnSeries, b: ReturnSeries
+) -> tuple[tuple[date, ...], npt.NDArray[np.float64], npt.NDArray[np.float64]]:
+    """Inner-join two return series, keeping the common dates.
+
+    Returns ``(dates, a_values, b_values)`` — the shared period-end dates (in
+    ascending order) and the float64 values of each series on exactly those
+    dates. This is the single join implementation; :func:`align` is the
+    date-dropping projection for scalar metrics, and dated two-series results
+    (excess-return *series*) build on this so the join lives in one place
+    (``spec-analytics §2``: "no metric re-implements a join inline").
+    """
+    b_index: dict[date, int] = {d: i for i, d in enumerate(b.dates)}
+    dates_out: list[date] = []
+    a_out: list[float] = []
+    b_out: list[float] = []
+    for i, d in enumerate(a.dates):
+        j = b_index.get(d)
+        if j is not None:
+            dates_out.append(d)
+            a_out.append(float(a.values[i]))
+            b_out.append(float(b.values[j]))
+    return (
+        tuple(dates_out),
+        np.array(a_out, dtype=np.float64),
+        np.array(b_out, dtype=np.float64),
+    )
+
+
 def align(
     a: ReturnSeries, b: ReturnSeries
 ) -> tuple[npt.NDArray[np.float64], npt.NDArray[np.float64]]:
@@ -27,20 +56,11 @@ def align(
     fund" the natural, no-op case: only the overlap is used).
 
     An empty overlap yields two empty arrays; the caller decides whether that is
-    an error (metrics that need ≥2 points fail loud on it).
+    an error (metrics that need ≥2 points fail loud on it). Thin projection of
+    :func:`align_dated` — the join itself has one implementation.
     """
-    b_index: dict[date, int] = {d: i for i, d in enumerate(b.dates)}
-    a_out: list[float] = []
-    b_out: list[float] = []
-    for i, d in enumerate(a.dates):
-        j = b_index.get(d)
-        if j is not None:
-            a_out.append(float(a.values[i]))
-            b_out.append(float(b.values[j]))
-    return (
-        np.array(a_out, dtype=np.float64),
-        np.array(b_out, dtype=np.float64),
-    )
+    _, a_vals, b_vals = align_dated(a, b)
+    return a_vals, b_vals
 
 
 def between(rs: ReturnSeries, start: date, end: date) -> ReturnSeries:
