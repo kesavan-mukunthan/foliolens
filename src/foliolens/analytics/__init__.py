@@ -15,9 +15,15 @@ the metrics ``period_return_abs``, ``volatility``, ``downside_deviation``,
 episode), ``var_historical``, ``cvar`` — pure over ``ReturnSeries`` /
 ``ValueIndex`` — with the ``*_of`` daily adapters that read ``investment.source``.
 Drawdown is the one family that reads daily NAV, not the monthly series.
+
+§4 (rolling + distribution): ``rolling_return`` / ``rolling_returns`` (monthly
+step, 1Y/3Y/5Y windows, reusing ``period_return_abs``) and the distribution
+stats ``pct_positive``, ``best_period``, ``worst_period``, ``skew``,
+``kurtosis`` — all pure over ``ReturnSeries``.
 """
 from __future__ import annotations
 
+from .distribution import best_period, kurtosis, pct_positive, skew, worst_period
 from .drawdown import (
     Drawdown,
     cvar,
@@ -37,6 +43,7 @@ from .metrics import (
     sortino,
     volatility,
 )
+from .rolling import ROLLING_WINDOWS, rolling_return, rolling_returns
 from .series_ops import align, between
 
 __all__ = [
@@ -57,4 +64,12 @@ __all__ = [
     "drawdown_of",
     "var_historical_of",
     "cvar_of",
+    "ROLLING_WINDOWS",
+    "rolling_return",
+    "rolling_returns",
+    "pct_positive",
+    "best_period",
+    "worst_period",
+    "skew",
+    "kurtosis",
 ]
