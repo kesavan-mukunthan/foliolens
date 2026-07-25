@@ -20,9 +20,29 @@ Drawdown is the one family that reads daily NAV, not the monthly series.
 step, 1Y/3Y/5Y windows, reusing ``period_return_abs``) and the distribution
 stats ``pct_positive``, ``best_period``, ``worst_period``, ``skew``,
 ``kurtosis`` — all pure over ``ReturnSeries``.
+
+§5 (adapters + artifact): the ``*_of(investment, …)`` peers that read
+``investment.returns`` and delegate to the pure functions (``adapters``), and the
+versioned metrics artifact ``MetricsResult`` / ``build_metrics`` (``artifact``).
 """
 from __future__ import annotations
 
+from .adapters import (
+    best_period_of,
+    calmar_of,
+    downside_deviation_of,
+    kurtosis_of,
+    pct_positive_of,
+    period_return_abs_of,
+    rolling_return_of,
+    rolling_returns_of,
+    sharpe_of,
+    skew_of,
+    sortino_of,
+    volatility_of,
+    worst_period_of,
+)
+from .artifact import SCHEMA_VERSION, MetricsResult, SeriesPoint, build_metrics
 from .distribution import best_period, kurtosis, pct_positive, skew, worst_period
 from .drawdown import (
     Drawdown,
@@ -72,4 +92,23 @@ __all__ = [
     "worst_period",
     "skew",
     "kurtosis",
+    # §5 adapters (read .returns, delegate to the pure functions)
+    "period_return_abs_of",
+    "volatility_of",
+    "downside_deviation_of",
+    "sharpe_of",
+    "sortino_of",
+    "calmar_of",
+    "rolling_return_of",
+    "rolling_returns_of",
+    "pct_positive_of",
+    "best_period_of",
+    "worst_period_of",
+    "skew_of",
+    "kurtosis_of",
+    # §5 metrics artifact
+    "SCHEMA_VERSION",
+    "MetricsResult",
+    "SeriesPoint",
+    "build_metrics",
 ]
