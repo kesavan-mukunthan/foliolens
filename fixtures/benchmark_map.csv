@@ -1,0 +1,15 @@
+# Fund -> benchmark mapping (spec-benchmarks §2). Hand-curated per cohort.
+# Columns: amfi_code, benchmark_code, tier   (tier in {tier1, alternate})
+# Return variant is part of benchmark identity: TRI only, encoded in the code.
+# Entries are the funds' stated benchmarks per AMC factsheets/SIDs. Verified
+# seed for the flexicap (direct-growth) cohort; grows fund by fund.
+#
+# The category yardstick (NIFTY500TRI for flexi_cap) is a category constant, not
+# a row here — see benchmark_map.CATEGORY_YARDSTICK / load_scheme_master.
+amfi_code,benchmark_code,tier
+# Bandhan Flexi Cap Fund - Direct Plan - Growth: stated tier-1 is BSE 500 TRI,
+# with NIFTY 50 TRI as the additional (alternate) benchmark.
+118424,BSE500TRI,tier1
+118424,NIFTY50TRI,alternate
+# Parag Parikh Flexi Cap Fund - Direct Plan - Growth: stated benchmark NIFTY 500 TRI.
+122639,NIFTY500TRI,tier1

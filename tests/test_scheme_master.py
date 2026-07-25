@@ -12,6 +12,7 @@ import json
 from pathlib import Path
 from typing import Any
 
+import pyarrow as pa
 import pyarrow.parquet as pq
 import pytest
 
@@ -173,9 +174,9 @@ def test_land_scheme_master_roundtrip(tmp_path: Path) -> None:
     # Sorted by amfi_code regardless of input order.
     assert table.column("amfi_code").to_pylist() == ["118424", "118535"]
     assert table.column("sebi_category").to_pylist() == ["flexi_cap", "flexi_cap"]
-    # All columns are strings; nullable columns hold real nulls, not "None".
-    for field in table.schema:
-        assert field.type.equals(pq.read_table(path).schema.field(field.name).type)
+    # Every column is stored as a string (nullable columns hold real nulls,
+    # exercised in test_land_scheme_master_holds_real_nulls).
+    assert all(pa.types.is_string(f.type) for f in table.schema)
 
 
 def test_land_scheme_master_holds_real_nulls(tmp_path: Path) -> None:
