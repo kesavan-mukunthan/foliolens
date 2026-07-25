@@ -3,6 +3,9 @@
 Synthetic CSVs encode the documented source shapes (niftyindices TRI, BSE TRI).
 When the real downloads land, a column/date-format drift is a localised fix in
 ingest/index_normalise.py; these tests pin the contract, not the live files.
+
+Index fixtures are synthetic; real index levels are licensed and never enter the
+repo.
 """
 from __future__ import annotations
 
@@ -150,3 +153,42 @@ def test_benchmark_returns_monthly_float64(tmp_path: Path) -> None:
     r = bench.returns
     assert r.values.dtype.name == "float64"
     assert len(r) == 2  # 3 month-ends → 2 returns
+
+
+# --- §4 index CAGR: own vs oracle on deterministic dummy data ---------------
+#
+# The own↔published leg (≤10 bps vs NSE/BSE factsheets) needs the real TRI
+# series and is a locally-run step. The own↔oracle leg (CLAUDE.md: ≤1e-6),
+# though, is fully checkable in CI on committed synthetic data: a benchmark that
+# *doubles every year* has year-end levels 1,2,4,…,128 — integers exact under
+# decimal128 — so every trailing CAGR is exactly 100%. Own (Decimal engine) is
+# reconciled against an independent float recompute of the same stored levels.
+
+
+def _doubling_index() -> list[IndexRecord]:
+    # Dec-31 anchors 2018..2025; level doubles each year (exact integers).
+    return [
+        IndexRecord("NIFTY500TRI", date(2018 + i, 12, 31), Decimal(2**i))
+        for i in range(8)
+    ]
+
+
+@pytest.mark.parametrize("period, years", [("1Y", 1), ("3Y", 3), ("5Y", 5)])
+def test_index_cagr_own_vs_oracle(tmp_path: Path, period: str, years: int) -> None:
+    from foliolens.returns.engine import period_return
+
+    land_index(_doubling_index(), tmp_path)
+    bench = benchmark_from_index(
+        DataAccess(tmp_path).load_index_series("NIFTY500TRI")
+    )
+    as_of = date(2025, 12, 31)
+
+    rr = period_return(bench, period, as_of)
+    own = float(rr.value)
+    # Oracle: independent point-to-point CAGR from the same stored decimals.
+    start_level = float(bench.value_series.as_of(rr.start_date))  # type: ignore[arg-type]
+    oracle = (float(rr.end_nav) / start_level) ** (1 / years) - 1
+
+    assert rr.method == "CAGR"
+    assert abs(own - oracle) <= 1e-6  # own ↔ oracle gate
+    assert own == pytest.approx(1.0, abs=1e-9)  # doubling → exactly 100% p.a.
