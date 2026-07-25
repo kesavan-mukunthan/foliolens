@@ -6,6 +6,8 @@ Green pytest is the acceptance gate for every step. Two tiers:
 
 All fixtures load from `fixtures/` only. **No test calls mftool or any live source** — `conftest.py` loads frozen snapshots and guards against network. A test that needs the network is a bug.
 
+**Index fixtures are synthetic; real index levels are licensed and never enter the repo.** Benchmark/index tests build their own TRI records inline (or land tiny synthetic parquet). The own↔published index-CAGR leg reconciles against real NSE/BSE series + factsheet figures and is therefore a **locally-run** step, never a committed fixture — do not add real index slices to `fixtures/` or `nav_snapshots/`.
+
 ## invariants/
 
 ### test_decimal.py
