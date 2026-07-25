@@ -22,6 +22,7 @@ from typing import Any, cast
 
 from .land import land
 from .mftool_client import fetch_nav_history, fetch_scheme_codes, normalise
+from .scheme_master import SchemeMasterRecord, land_scheme_master, scheme_record
 
 _LOG = logging.getLogger(__name__)
 
@@ -160,16 +161,26 @@ def land_universe(
 
 
 def consolidate(data_dir: Path) -> Path:
-    """Read all shards in data_dir/raw/ and write data_dir/nav.parquet.
+    """Read all shards in data_dir/raw/ and write nav + scheme_master parquet.
 
-    Shards are processed in amfi_code order. Overwrites any existing nav.parquet.
+    Each shard is read once and feeds two derivations in the same pass:
+    ``nav.parquet`` (the figure-of-record NAV panel) and
+    ``scheme_master.parquet`` (one metadata row per shard — no refetch). Shards
+    are processed in amfi_code order. Overwrites any existing files.
+    Returns the nav.parquet path.
     """
     shards = sorted((data_dir / "raw").glob("*.json.gz"))
     records = []
+    scheme_records: list[SchemeMasterRecord] = []
     for shard in shards:
         amfi_code = shard.name.removesuffix(".json.gz")
-        records.extend(normalise(amfi_code, _read_shard(shard)))
-    return land(records, data_dir)
+        raw = _read_shard(shard)
+        records.extend(normalise(amfi_code, raw))
+        scheme_records.append(scheme_record(amfi_code, raw))
+    nav_path = land(records, data_dir)
+    master_path = land_scheme_master(scheme_records, data_dir)
+    _LOG.info("scheme_master → %s (%d rows)", master_path, len(scheme_records))
+    return nav_path
 
 
 def main() -> None:
