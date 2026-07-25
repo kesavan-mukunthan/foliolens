@@ -33,6 +33,13 @@ series (``relative``) — ``excess_return``, ``tracking_error``,
 (``rolling_excess_return`` / ``rolling_beta`` / ``rolling_correlation``,
 compositions over §4's windowing) — with the ``*_of`` adapters that read the
 fund's / benchmark's / rf's ``.returns`` (benchmark & rf as Investments).
+
+§7 (peer / cross-sectional): pure functions over a caller-supplied cohort
+(``peer``) — ``percentile_ranks`` over a ``{fund_id: value|None}`` map,
+``category_aggregate`` (median/q1/q3/count over non-nulls) → ``CategoryAggregate``,
+and ``rank_history`` over ``{fund_id: ReturnSeries}`` rolling panels (percentile
+ranks per date, per-date cohort). No knowledge of categories, benchmarks, or the
+scheme master — the caller assembles the cohort.
 """
 from __future__ import annotations
 
@@ -85,6 +92,12 @@ from .metrics import (
     sharpe,
     sortino,
     volatility,
+)
+from .peer import (
+    CategoryAggregate,
+    category_aggregate,
+    percentile_ranks,
+    rank_history,
 )
 from .relative import (
     RELATIVE_ROLLING_WINDOWS,
@@ -189,4 +202,9 @@ __all__ = [
     "rolling_excess_return_of",
     "rolling_beta_of",
     "rolling_correlation_of",
+    # §7 peer / cross-sectional (pure functions over a caller-supplied cohort)
+    "percentile_ranks",
+    "CategoryAggregate",
+    "category_aggregate",
+    "rank_history",
 ]
