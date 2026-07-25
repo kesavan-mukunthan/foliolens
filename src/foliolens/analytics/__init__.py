@@ -24,21 +24,44 @@ stats ``pct_positive``, ``best_period``, ``worst_period``, ``skew``,
 §5 (adapters + artifact): the ``*_of(investment, …)`` peers that read
 ``investment.returns`` and delegate to the pure functions (``adapters``), and the
 versioned metrics artifact ``MetricsResult`` / ``build_metrics`` (``artifact``).
+
+§6 (benchmark-relative): pure functions over the aligned fund/benchmark/rf
+series (``relative``) — ``excess_return``, ``tracking_error``,
+``information_ratio``, ``beta``, ``correlation``, ``r_squared``,
+``jensens_alpha`` (an ``AlphaResult`` carrying the t-stat + window), ``treynor``,
+``up_capture`` / ``down_capture``, ``hit_rate``, and the rolling-relative panels
+(``rolling_excess_return`` / ``rolling_beta`` / ``rolling_correlation``,
+compositions over §4's windowing) — with the ``*_of`` adapters that read the
+fund's / benchmark's / rf's ``.returns`` (benchmark & rf as Investments).
 """
 from __future__ import annotations
 
 from .adapters import (
     best_period_of,
+    beta_of,
     calmar_of,
+    correlation_of,
+    down_capture_of,
     downside_deviation_of,
+    excess_return_of,
+    hit_rate_of,
+    information_ratio_of,
+    jensens_alpha_of,
     kurtosis_of,
     pct_positive_of,
     period_return_abs_of,
+    r_squared_of,
+    rolling_beta_of,
+    rolling_correlation_of,
+    rolling_excess_return_of,
     rolling_return_of,
     rolling_returns_of,
     sharpe_of,
     skew_of,
     sortino_of,
+    tracking_error_of,
+    treynor_of,
+    up_capture_of,
     volatility_of,
     worst_period_of,
 )
@@ -63,11 +86,32 @@ from .metrics import (
     sortino,
     volatility,
 )
+from .relative import (
+    RELATIVE_ROLLING_WINDOWS,
+    AlphaResult,
+    beta,
+    correlation,
+    down_capture,
+    excess_return,
+    hit_rate,
+    information_ratio,
+    jensens_alpha,
+    r_squared,
+    rolling_beta,
+    rolling_betas,
+    rolling_correlation,
+    rolling_correlations,
+    rolling_excess_return,
+    tracking_error,
+    treynor,
+    up_capture,
+)
 from .rolling import ROLLING_WINDOWS, rolling_return, rolling_returns
-from .series_ops import align, between
+from .series_ops import align, align_dated, between
 
 __all__ = [
     "align",
+    "align_dated",
     "between",
     "period_return_abs",
     "volatility",
@@ -111,4 +155,38 @@ __all__ = [
     "MetricsResult",
     "SeriesPoint",
     "build_metrics",
+    # §6 benchmark-relative pure functions
+    "excess_return",
+    "tracking_error",
+    "information_ratio",
+    "beta",
+    "correlation",
+    "r_squared",
+    "AlphaResult",
+    "jensens_alpha",
+    "treynor",
+    "up_capture",
+    "down_capture",
+    "hit_rate",
+    "RELATIVE_ROLLING_WINDOWS",
+    "rolling_excess_return",
+    "rolling_beta",
+    "rolling_correlation",
+    "rolling_betas",
+    "rolling_correlations",
+    # §6 benchmark-relative adapters
+    "excess_return_of",
+    "tracking_error_of",
+    "information_ratio_of",
+    "beta_of",
+    "correlation_of",
+    "r_squared_of",
+    "jensens_alpha_of",
+    "treynor_of",
+    "up_capture_of",
+    "down_capture_of",
+    "hit_rate_of",
+    "rolling_excess_return_of",
+    "rolling_beta_of",
+    "rolling_correlation_of",
 ]
