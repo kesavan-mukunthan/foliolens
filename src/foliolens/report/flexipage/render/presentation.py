@@ -30,6 +30,29 @@ _METRIC_ROWS: tuple[tuple[str, str, bool, bool], ...] = (
     ("beta", "Beta", False, False),
 )
 
+#: Row/column label for the derived benchmark-return figure, shown between
+#: each window's Return and Excess Return (Return, Benchmark, Excess).
+BENCHMARK_RETURN_LABEL = "Benchmark Return"
+
+
+def _benchmark_return(metrics: dict[str, Any], window: str) -> float | None:
+    """The category benchmark's own trailing return for ``window``.
+
+    Not a new computation: ``excess_return_{window}`` is already ``return_
+    {window} − benchmark_return`` (``assembly.py``'s ``_excess_return_
+    scalar``), so the benchmark figure is recovered by the same subtraction
+    in reverse, over two numbers already stored in the artifact. Identical
+    for every fund at a given window (one category yardstick, one ``as_of``
+    — ``spec-flexicap-page §1``); ``None`` whenever either input is (never a
+    fabricated figure).
+    """
+    ret = metrics.get(f"return_{window}")
+    excess = metrics.get(f"excess_return_{window}")
+    if ret is None or excess is None:
+        return None
+    return float(ret) - float(excess)
+
+
 #: |t-stat| below this greys the alpha figure out (``spec-flexicap-page §2``).
 ALPHA_T_STAT_GREY_THRESHOLD = 2.0
 
@@ -87,16 +110,30 @@ class AlphaCell:
 
 
 def build_metrics_rows(metrics: dict[str, Any]) -> list[MetricRow]:
-    """The per-fund metrics table body, one row per :data:`_METRIC_ROWS` entry."""
-    return [
-        MetricRow(
-            label=label,
-            is_pct=is_pct,
-            is_excess=is_excess,
-            values={w: metrics.get(f"{key}_{w}") for w in WINDOWS},
+    """The per-fund metrics table body: one row per :data:`_METRIC_ROWS` entry,
+    with the derived benchmark-return row spliced in right after Return (so
+    the order reads Return, Benchmark, Excess Return).
+    """
+    rows: list[MetricRow] = []
+    for key, label, is_pct, is_excess in _METRIC_ROWS:
+        rows.append(
+            MetricRow(
+                label=label,
+                is_pct=is_pct,
+                is_excess=is_excess,
+                values={w: metrics.get(f"{key}_{w}") for w in WINDOWS},
+            )
         )
-        for key, label, is_pct, is_excess in _METRIC_ROWS
-    ]
+        if key == "return":
+            rows.append(
+                MetricRow(
+                    label=BENCHMARK_RETURN_LABEL,
+                    is_pct=True,
+                    is_excess=False,
+                    values={w: _benchmark_return(metrics, w) for w in WINDOWS},
+                )
+            )
+    return rows
 
 
 def build_alpha_row(alpha: dict[str, Any]) -> dict[str, AlphaCell | None]:
@@ -135,10 +172,13 @@ class IndexRow:
     scheme_name: str
     fund_house: str
     return_1y: float | None
+    benchmark_return_1y: float | None
     excess_return_1y: float | None
     return_3y: float | None
+    benchmark_return_3y: float | None
     excess_return_3y: float | None
     return_5y: float | None
+    benchmark_return_5y: float | None
     excess_return_5y: float | None
     volatility: float | None
     sharpe: float | None
@@ -167,10 +207,13 @@ def build_index_rows(funds: list[dict[str, Any]]) -> list[IndexRow]:
                 scheme_name=f["scheme_name"],
                 fund_house=f["fund_house"],
                 return_1y=m.get("return_1Y"),
+                benchmark_return_1y=_benchmark_return(m, "1Y"),
                 excess_return_1y=m.get("excess_return_1Y"),
                 return_3y=m.get("return_3Y"),
+                benchmark_return_3y=_benchmark_return(m, "3Y"),
                 excess_return_3y=m.get("excess_return_3Y"),
                 return_5y=m.get("return_5Y"),
+                benchmark_return_5y=_benchmark_return(m, "5Y"),
                 excess_return_5y=m.get("excess_return_5Y"),
                 volatility=m.get(f"volatility_{INDEX_TABLE_WINDOW}"),
                 sharpe=m.get(f"sharpe_{INDEX_TABLE_WINDOW}"),

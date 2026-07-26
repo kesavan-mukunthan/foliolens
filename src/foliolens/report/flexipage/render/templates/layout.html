@@ -31,9 +31,12 @@
   /* Excess-return colouring only (amendment 4) — plain classes, not inline
      style, so a later print stylesheet (F3) can leave colour alone instead
      of having to strip an inline attribute; do not scope these to a
-     screen-only media query. */
-  .excess-pos { color: #1a7f37; }
-  .excess-neg { color: #c4560c; }
+     screen-only media query. Background fill (not font colour); white text
+     for contrast against both. A print stylesheet will need
+     print-color-adjust: exact for the fill to survive to paper — noted for
+     F3, not handled here. */
+  .excess-pos { background-color: #1a7f37; color: #fff; }
+  .excess-neg { background-color: #c4560c; color: #fff; }
   .chart-block { margin: 1.5rem 0; }
   .chart-block svg { max-width: 100%; height: auto; }
   .tier-fallback { display: inline-block; background: #fff3cd; color: #664d03; padding: 0.15rem 0.5rem; border-radius: 0.25rem; font-size: 0.8rem; }

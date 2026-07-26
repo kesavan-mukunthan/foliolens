@@ -29,10 +29,13 @@
       <th data-sortable="true">Fund</th>
       <th data-sortable="true">Fund House</th>
       <th data-sortable="true">Return 1Y</th>
+      <th data-sortable="true">Benchmark 1Y</th>
       <th data-sortable="true">Excess 1Y</th>
       <th data-sortable="true">Return 3Y</th>
+      <th data-sortable="true">Benchmark 3Y</th>
       <th data-sortable="true">Excess 3Y</th>
       <th data-sortable="true">Return 5Y</th>
+      <th data-sortable="true">Benchmark 5Y</th>
       <th data-sortable="true">Excess 5Y</th>
       <th data-sortable="true">Volatility (3Y)</th>
       <th data-sortable="true">Sharpe (3Y)</th>
@@ -45,10 +48,13 @@
       <td data-value="{{ row.scheme_name }}"><a href="funds/{{ row.amfi_code }}.html">{{ row.scheme_name }}</a></td>
       <td data-value="{{ row.fund_house }}">{{ row.fund_house }}</td>
       <td data-value="{{ row.return_1y|dataval }}">{{ row.return_1y|pct }}</td>
+      <td data-value="{{ row.benchmark_return_1y|dataval }}">{{ row.benchmark_return_1y|pct }}</td>
       <td data-value="{{ row.excess_return_1y|dataval }}" class="{{ row.excess_return_1y|excess_class }}">{{ row.excess_return_1y|pct }}</td>
       <td data-value="{{ row.return_3y|dataval }}">{{ row.return_3y|pct }}</td>
+      <td data-value="{{ row.benchmark_return_3y|dataval }}">{{ row.benchmark_return_3y|pct }}</td>
       <td data-value="{{ row.excess_return_3y|dataval }}" class="{{ row.excess_return_3y|excess_class }}">{{ row.excess_return_3y|pct }}</td>
       <td data-value="{{ row.return_5y|dataval }}">{{ row.return_5y|pct }}</td>
+      <td data-value="{{ row.benchmark_return_5y|dataval }}">{{ row.benchmark_return_5y|pct }}</td>
       <td data-value="{{ row.excess_return_5y|dataval }}" class="{{ row.excess_return_5y|excess_class }}">{{ row.excess_return_5y|pct }}</td>
       <td data-value="{{ row.volatility|dataval }}">{{ row.volatility|pct }}</td>
       <td data-value="{{ row.sharpe|dataval }}">{{ row.sharpe|num }}</td>
