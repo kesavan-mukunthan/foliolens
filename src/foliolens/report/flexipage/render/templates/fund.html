@@ -1,0 +1,65 @@
+{% extends "layout.html" %}
+{% block title %}{{ fund.scheme_name }} — FolioLens{% endblock %}
+{% block content %}
+<h1>{{ fund.scheme_name }}</h1>
+<p class="fund-house">{{ fund.fund_house }} &middot; {{ fund.amfi_code }}</p>
+
+<section class="benchmark-block">
+  <p>Ranked vs category benchmark ({{ fund.benchmark.yardstick }}).</p>
+  {% if fund.benchmark.tier == "alternate-pending-tier1" %}
+  <p><span class="tier-fallback">{{ tier_fallback_label }}</span>
+    &mdash; stated benchmark {{ fund.benchmark.stated }} has not landed yet.</p>
+  {% elif fund.benchmark.stated %}
+  <p>Stated benchmark: {{ fund.benchmark.stated }} ({{ fund.benchmark.tier }})</p>
+  {% endif %}
+</section>
+
+<h2>Metrics</h2>
+<table>
+  <thead><tr><th>Metric</th><th>1Y</th><th>3Y</th><th>5Y</th></tr></thead>
+  <tbody>
+    {% for row in metrics_rows %}
+    <tr>
+      <td>{{ row.label }}</td>
+      {% for w in windows %}
+      <td>{{ row.values[w]|pct if row.is_pct else row.values[w]|num }}</td>
+      {% endfor %}
+    </tr>
+    {% endfor %}
+    <tr>
+      <td>Alpha (t-stat)</td>
+      {% for w in windows %}
+      {% set a = alpha_row[w] %}
+      <td class="{{ 'greyed' if a and a.greyed else '' }}">
+        {%- if a %}{{ a.value|pct }} (t={{ a.t_stat|num }}){% else %}—{% endif -%}
+      </td>
+      {% endfor %}
+    </tr>
+    <tr><td>Max Drawdown (SI)</td><td colspan="3">{{ fund.metrics.max_drawdown_SI|pct }}</td></tr>
+  </tbody>
+</table>
+
+<h2>Calendar Year Returns</h2>
+<table>
+  <thead><tr>{% for year in calendar_years %}<th>{{ year }}</th>{% endfor %}</tr></thead>
+  <tbody><tr>{% for year in calendar_years %}<td>{{ fund.calendar_years[year]|pct }}</td>{% endfor %}</tr></tbody>
+</table>
+
+<h2>Charts</h2>
+{% if charts.growth_10k %}<div class="chart-block">{{ charts.growth_10k|safe }}</div>{% endif %}
+{% if charts.drawdown %}<div class="chart-block">{{ charts.drawdown|safe }}</div>{% endif %}
+{% if charts.rolling_excess_return %}<div class="chart-block">{{ charts.rolling_excess_return|safe }}</div>{% endif %}
+{% if charts.rolling_sharpe_rank %}<div class="chart-block">{{ charts.rolling_sharpe_rank|safe }}</div>{% endif %}
+{% if not (charts.growth_10k or charts.drawdown or charts.rolling_excess_return or charts.rolling_sharpe_rank) %}
+<p><em>No charts available for this fund yet.</em></p>
+{% endif %}
+
+{% if fund.commentary %}
+<h2>Commentary</h2>
+<div class="commentary"><p>{{ fund.commentary.text }}</p></div>
+{% endif %}
+
+<footer class="provenance">
+  <p>Data as of {{ as_of }}. Factsheet verification: {{ "verified" if fund.factsheet_verified else "not recorded in this artifact" }}.</p>
+</footer>
+{% endblock %}
