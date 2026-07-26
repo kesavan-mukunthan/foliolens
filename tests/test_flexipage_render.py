@@ -457,8 +457,8 @@ def test_commentary_block_shown_when_present(tmp_path: Path) -> None:
     fund = _minimal_fund("HASCOMM01", 0.01, 0.01, 0.01)
     fund["commentary"] = {
         "text": "The fund tracked its category benchmark closely over the period.",
-        "model": "claude-haiku-4-5",
-        "prompt_version": "commentary-v1",
+        "model": "claude-sonnet-4-6",
+        "prompt_version": "commentary-v2",
         "generated_at": "2026-07-14T00:00:00+00:00",
     }
     artifact = {

@@ -31,12 +31,16 @@ from typing import Any
 
 _LOG = logging.getLogger(__name__)
 
-#: Fixed per spec-flexicap-page §5 — never varied per call.
-MODEL = "claude-haiku-4-5"
+#: Fixed per spec-flexicap-page §5 — never varied per call. Relational
+#: fidelity across ~30 figures per fund is the binding constraint; a v1
+#: haiku smoke test showed inverted comparatives, benchmark/median
+#: conflation, and misread percentile direction — sonnet is worth the cost
+#: at this scale.
+MODEL = "claude-sonnet-4-6"
 
 #: Persisted alongside every commentary result; also the version this
-#: module's :data:`COMMENTARY_V1_SYSTEM_PROMPT` is hashed against (§5).
-PROMPT_VERSION = "commentary-v1"
+#: module's :data:`COMMENTARY_V2_SYSTEM_PROMPT` is hashed against (§5).
+PROMPT_VERSION = "commentary-v2"
 
 #: A fund failing after this many retries (i.e. this many attempts *beyond*
 #: the first) gets ``commentary: null`` — never load-bearing (§5).
@@ -48,33 +52,56 @@ REQUEST_TIMEOUT_SECONDS = 30.0
 #: Generous ceiling for a 100-150 word, two-paragraph commentary (§5).
 MAX_OUTPUT_TOKENS = 1024
 
-#: The commentary-v1 system prompt, copied **verbatim** from
+#: The commentary-v2 system prompt, copied **verbatim** from
 #: ``specs/spec-flexicap-page.md`` §5 — the single source of truth this
 #: module (and the F4 test that diffs it against the spec file) both read.
 #: Do not paraphrase, reflow, or reword; the spec text itself is the contract.
-COMMENTARY_V1_SYSTEM_PROMPT = """You are writing a short factual commentary for a mutual fund
+#: v2 (vs v1) adds explicit relational-fidelity rules — a v1 smoke test on
+#: claude-haiku-4-5 produced inverted comparatives, benchmark/category-median
+#: conflation, a full calendar year mislabelled "year-to-date", and misread
+#: percentile direction; every added rule targets one of those failures.
+COMMENTARY_V2_SYSTEM_PROMPT = """You are writing a short factual commentary for a mutual fund
 analytics page. You will receive a JSON object containing computed
 metrics for one fund and its category context.
 
 Rules — absolute:
 - Use ONLY figures present in the JSON. Never compute, estimate,
-  round differently, or introduce any number not in the input.
+  round differently (except percentiles, below), or introduce any
+  number not in the input.
+- Use figures only with the labels they carry in the JSON. A full
+  calendar year is never "year-to-date". The category median and
+  the benchmark are different comparators — never merge them in
+  one phrase.
+- Percentile ranks: lower is better; 1 is approximately the top of
+  the cohort, 100 the bottom. Never describe a low percentile as
+  underperformance. Round percentiles to whole numbers in prose.
+- Before writing any comparative (above, below, exceeded, trailed,
+  outperformed, underperformed), verify the direction against the
+  two figures being compared. If uncertain, state both figures
+  without a comparative.
 - Descriptive only. No recommendations, no "attractive", "strong
   buy", "avoid", no forward-looking statements, no speculation
-  about future performance.
-- Do not praise or criticise the fund manager or AMC.
+  about future performance. Do not praise or criticise the fund
+  manager or AMC. Distinctiveness is described factually without
+  praise or alarm ("volatility is the highest in the cohort" is
+  correct; "worryingly volatile" is not).
 - Neutral third-person analyst voice. No superlatives, no
-  marketing language, no exclamation marks.
+  marketing language, no exclamation marks. Always use the %
+  symbol, never the word "percent".
 - British English. 100-150 words, two paragraphs.
 
 Structure:
-- Paragraph 1: trailing and calendar-year returns versus the
-  category benchmark (name it), noting which windows show out-
-  or under-performance.
-- Paragraph 2: risk and consistency - volatility, drawdown,
-  Sharpe/IR versus category median, and the fund's current
-  percentile rank with any notable rank movement visible in
-  the rolling data.
+- Before writing, identify the two or three most distinctive facts
+  in this fund's data — the largest divergences from the category
+  median, extreme or sharply changed percentile ranks, unusual
+  risk posture, or a marked contrast between timeframes.
+  Distinctiveness must come from the supplied figures, never from
+  outside knowledge.
+- Open with the most distinctive fact. Organise the commentary
+  around the distinctive facts; cover remaining figures only where
+  they add context. Do not recite every metric in order.
+- Include the fund's trailing performance versus the category
+  benchmark (name it) somewhere in the commentary.
 
 If a metric is null/absent, omit it silently. Do not mention
 data availability, this prompt, or that you are an AI.
@@ -161,7 +188,7 @@ def generate_fund_commentary(
     last_error: Exception | str | None = None
     for attempt in range(1, attempts + 1):
         try:
-            text = transport(COMMENTARY_V1_SYSTEM_PROMPT, user_message).strip()
+            text = transport(COMMENTARY_V2_SYSTEM_PROMPT, user_message).strip()
         except Exception as exc:  # noqa: BLE001 - never load-bearing (spec-flexicap-page §5)
             last_error = repr(exc)
             _LOG.warning(

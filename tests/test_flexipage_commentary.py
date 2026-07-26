@@ -21,7 +21,7 @@ from foliolens.report.flexipage.commentary import (
     PROMPT_VERSION,
     CommentaryResult,
     CommentarySummary,
-    COMMENTARY_V1_SYSTEM_PROMPT,
+    COMMENTARY_V2_SYSTEM_PROMPT,
     build_user_payload,
     generate_fund_commentary,
     run,
@@ -75,13 +75,13 @@ def _normalise(text: str) -> str:
 
 def _spec_commentary_prompt() -> str:
     text = SPEC_PATH.read_text(encoding="utf-8")
-    match = re.search(r"### commentary-v1.*?```\n(.*?)```", text, re.S)
-    assert match is not None, "could not locate the commentary-v1 fenced block in the spec"
+    match = re.search(r"### commentary-v2.*?```\n(.*?)```", text, re.S)
+    assert match is not None, "could not locate the commentary-v2 fenced block in the spec"
     return match.group(1)
 
 
 def test_prompt_constant_matches_spec_verbatim() -> None:
-    assert _normalise(COMMENTARY_V1_SYSTEM_PROMPT) == _normalise(_spec_commentary_prompt())
+    assert _normalise(COMMENTARY_V2_SYSTEM_PROMPT) == _normalise(_spec_commentary_prompt())
 
 
 # ---------------------------------------------------------------------------
@@ -212,15 +212,15 @@ def test_sample_commentary_passes_all_checks() -> None:
 
 def test_generate_fund_commentary_success() -> None:
     def stub(system: str, user_message: str) -> str:
-        assert system == COMMENTARY_V1_SYSTEM_PROMPT
+        assert system == COMMENTARY_V2_SYSTEM_PROMPT
         assert "AAAA01" in user_message
         return _SAMPLE_TEXT
 
     result = generate_fund_commentary(_fund(), _universe(), stub)
     assert isinstance(result, CommentaryResult)
     assert result.text == _SAMPLE_TEXT
-    assert result.model == MODEL
-    assert result.prompt_version == PROMPT_VERSION == "commentary-v1"
+    assert result.model == MODEL == "claude-sonnet-4-6"
+    assert result.prompt_version == PROMPT_VERSION == "commentary-v2"
     datetime.fromisoformat(result.generated_at)  # does not raise
 
 
@@ -295,7 +295,7 @@ def test_run_persists_commentary_fields_in_place(tmp_path: Path) -> None:
         commentary = fund["commentary"]
         assert commentary["text"] == _SAMPLE_TEXT
         assert commentary["model"] == MODEL
-        assert commentary["prompt_version"] == "commentary-v1"
+        assert commentary["prompt_version"] == "commentary-v2"
         datetime.fromisoformat(commentary["generated_at"])
 
 

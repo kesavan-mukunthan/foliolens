@@ -70,7 +70,7 @@ recomputed here — the runner calls existing functions only.
     "rolling": {panel_name: [{"date": d, "value": v}]},
     "ranks": {metric_window: {"pct": v, "history": [{"date": d, "pct": v}]}},
     // pct (latest + history): lower = better; 1 ≈ top of cohort
-    "commentary": {"text": str, "model": str, "prompt_version": "commentary-v1",
+    "commentary": {"text": str, "model": str, "prompt_version": "commentary-v2",
                     "generated_at": ts} | null
   }]
 }
@@ -100,16 +100,18 @@ re-rounding outside the presentation layer.
 
 ## 5. Commentary
 
-- One Anthropic API call per fund at build time, model **claude-haiku-4-5**,
-  system prompt = `commentary-v1` (verbatim below), user message = the fund's
-  entry from metrics.json (metrics, calendar_years, ranks, universe
-  aggregates). Persisted into metrics.json with model + prompt_version.
+- One Anthropic API call per fund at build time, model **claude-sonnet-4-6**
+  (relational fidelity across ~30 figures per fund is the binding constraint;
+  cost is immaterial at this scale), system prompt = `commentary-v2`
+  (verbatim below), user message = the fund's entry from metrics.json
+  (metrics, calendar_years, ranks, universe aggregates). Persisted into
+  metrics.json with model + prompt_version.
 - Runs **locally only** this milestone; `ANTHROPIC_API_KEY` from env/`.env`
   (gitignored). Key never in either repo or artifacts. Build proceeds with
   `commentary: null` (block hidden) if key absent or a call fails after 2
   retries — commentary is never load-bearing.
 
-### commentary-v1 (system prompt, verbatim — hash this text as the version)
+### commentary-v2 (system prompt, verbatim — hash this text as the version)
 
 ```
 You are writing a short factual commentary for a mutual fund
@@ -118,23 +120,42 @@ metrics for one fund and its category context.
 
 Rules — absolute:
 - Use ONLY figures present in the JSON. Never compute, estimate,
-  round differently, or introduce any number not in the input.
+  round differently (except percentiles, below), or introduce any
+  number not in the input.
+- Use figures only with the labels they carry in the JSON. A full
+  calendar year is never "year-to-date". The category median and
+  the benchmark are different comparators — never merge them in
+  one phrase.
+- Percentile ranks: lower is better; 1 is approximately the top of
+  the cohort, 100 the bottom. Never describe a low percentile as
+  underperformance. Round percentiles to whole numbers in prose.
+- Before writing any comparative (above, below, exceeded, trailed,
+  outperformed, underperformed), verify the direction against the
+  two figures being compared. If uncertain, state both figures
+  without a comparative.
 - Descriptive only. No recommendations, no "attractive", "strong
   buy", "avoid", no forward-looking statements, no speculation
-  about future performance.
-- Do not praise or criticise the fund manager or AMC.
+  about future performance. Do not praise or criticise the fund
+  manager or AMC. Distinctiveness is described factually without
+  praise or alarm ("volatility is the highest in the cohort" is
+  correct; "worryingly volatile" is not).
 - Neutral third-person analyst voice. No superlatives, no
-  marketing language, no exclamation marks.
+  marketing language, no exclamation marks. Always use the %
+  symbol, never the word "percent".
 - British English. 100-150 words, two paragraphs.
 
 Structure:
-- Paragraph 1: trailing and calendar-year returns versus the
-  category benchmark (name it), noting which windows show out-
-  or under-performance.
-- Paragraph 2: risk and consistency - volatility, drawdown,
-  Sharpe/IR versus category median, and the fund's current
-  percentile rank with any notable rank movement visible in
-  the rolling data.
+- Before writing, identify the two or three most distinctive facts
+  in this fund's data — the largest divergences from the category
+  median, extreme or sharply changed percentile ranks, unusual
+  risk posture, or a marked contrast between timeframes.
+  Distinctiveness must come from the supplied figures, never from
+  outside knowledge.
+- Open with the most distinctive fact. Organise the commentary
+  around the distinctive facts; cover remaining figures only where
+  they add context. Do not recite every metric in order.
+- Include the fund's trailing performance versus the category
+  benchmark (name it) somewhere in the commentary.
 
 If a metric is null/absent, omit it silently. Do not mention
 data availability, this prompt, or that you are an AI.
