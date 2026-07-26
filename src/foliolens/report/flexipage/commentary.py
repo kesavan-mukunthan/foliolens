@@ -198,9 +198,85 @@ def _paragraph_count(text: str) -> int:
     return len([p for p in _PARAGRAPH_SPLIT_RE.split(text.strip()) if p.strip()])
 
 
+#: Absolute tolerance on the rounded-value comparison in
+#: :func:`_matches_at_some_scale` — the same order of magnitude as this
+#: codebase's own float-reconciliation convention (``CLAUDE.md``: own ↔
+#: oracle at relative ≤ 1e-6), generous enough to absorb float round-trip
+#: noise while never blurring two genuinely different figures together.
+_SCALE_MATCH_TOLERANCE = 1e-6
+
+#: The scale factors a written figure can be a faithful transform of an
+#: artifact value under: the artifact stores fractions (0.0218), prose
+#: writes percent (2.18) — that's ×100. ÷100 is kept for symmetry (a value
+#: already on a 0-100 scale, e.g. a percentile rank, echoed as a fraction).
+_SCALE_FACTORS = (1.0, 100.0, 0.01)
+
+
+def _json_numeric_leaves(node: object) -> list[float]:
+    """Every numeric leaf value in a parsed JSON structure (not its string
+    values or dict keys — those are still covered by the literal-substring
+    check, e.g. a calendar year used as a dict key, or a benchmark code
+    like ``NIFTY500TRI`` embedding ``500``).
+    """
+    values: list[float] = []
+    if isinstance(node, bool):
+        return values
+    if isinstance(node, (int, float)):
+        values.append(float(node))
+    elif isinstance(node, dict):
+        for v in node.values():
+            values.extend(_json_numeric_leaves(v))
+    elif isinstance(node, list):
+        for v in node:
+            values.extend(_json_numeric_leaves(v))
+    return values
+
+
+def _decimal_places(token: str) -> int:
+    return len(token.split(".", 1)[1]) if "." in token else 0
+
+
+def _matches_at_some_scale(token: str, json_values: list[float]) -> bool:
+    """Whether ``token`` (a numeral with no sign, per :func:`_numeral_tokens`)
+    is some JSON value rounded to the token's own decimal precision, at any
+    of :data:`_SCALE_FACTORS` — the fix for the dominant real-world false
+    positive: a fraction in the artifact (``0.0218``) written as a percent
+    in prose (``"2.18"``), which never substring-matches its own JSON source.
+    """
+    try:
+        token_value = float(token)
+    except ValueError:
+        return False
+    decimals = _decimal_places(token)
+    for value in json_values:
+        for factor in _SCALE_FACTORS:
+            rounded = round(abs(value) * factor, decimals)
+            if abs(rounded - token_value) < _SCALE_MATCH_TOLERANCE:
+                return True
+    return False
+
+
+def _fabricated_numbers(text: str, input_json: str) -> list[str]:
+    """Numeral tokens in ``text`` that are neither a literal substring of
+    ``input_json`` nor a same-value-at-another-scale match
+    (:func:`_matches_at_some_scale`) — genuinely absent figures.
+    """
+    tokens = list(dict.fromkeys(_numeral_tokens(text)))
+    if not tokens:
+        return []
+    json_values = _json_numeric_leaves(json.loads(input_json))
+    return [
+        tok
+        for tok in tokens
+        if tok not in input_json and not _matches_at_some_scale(tok, json_values)
+    ]
+
+
 def validate_commentary(text: str, input_json: str) -> list[str]:
     """The descriptive-only contract, as a pure function: no I/O, no
-    retries. Returns the list of named violations (empty means clean).
+    retries. Returns the list of named violations (empty means clean); each
+    violation names the exact offending tokens/terms, never just a count, so
+    a build log always shows what to look for.
 
     Shared by the runtime retry path (:func:`generate_fund_commentary`) and
     the F4 test suite (``spec-flexicap-page §7-F4``) — the check the tests
@@ -221,9 +297,7 @@ def validate_commentary(text: str, input_json: str) -> list[str]:
     if banned:
         violations.append(f"banned vocabulary: {', '.join(banned)}")
 
-    fabricated = list(
-        dict.fromkeys(tok for tok in _numeral_tokens(text) if tok not in input_json)
-    )
+    fabricated = _fabricated_numbers(text, input_json)
     if fabricated:
         violations.append(f"numbers not in input JSON: {', '.join(fabricated)}")
 

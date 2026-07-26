@@ -187,6 +187,43 @@ def test_validate_commentary_fabricated_number_flagged() -> None:
     assert any("numbers not in input JSON" in v and "42" in v for v in violations)
 
 
+def test_validate_commentary_percent_of_json_fraction_passes() -> None:
+    """The dominant real-world false positive: the artifact stores a
+    fraction (0.0218), prose reports it as a percent (2.18) -- "2.18" is
+    never a literal substring of "0.0218" (no decimal point lands between
+    the 2 and the 1), so this must pass via the scale-aware match, not the
+    substring check.
+    """
+    fund = _fund()
+    fund["metrics"]["return_1Y"] = 0.0218
+    input_json = json.dumps(build_user_payload(fund, _universe()), sort_keys=True)
+    assert "2.18" not in input_json  # confirms this exercises the scale match
+
+    text = (
+        "The fund's trailing one-year return was 2.18% against the category "
+        "benchmark, a modest but positive result for the period under review "
+        "this cycle across the twelve-month window measured to date overall.\n\n"
+        "No further figures are referenced in this short illustrative sample "
+        "paragraph, which exists only to exercise the percent-of-fraction "
+        "scale match in the validator against the fixture's own figures."
+    )
+    violations = validate_commentary(text, input_json)
+    assert not any("numbers not in input JSON" in v for v in violations)
+
+
+def test_validate_commentary_genuinely_absent_value_fails_at_both_scales() -> None:
+    """A value that is absent at 1x, 100x, and 0.01x scale alike must still
+    be flagged -- the fix widens what counts as a match, it doesn't disable
+    the check.
+    """
+    fund = _fund()
+    fund["metrics"]["return_1Y"] = 0.1318
+    input_json = json.dumps(build_user_payload(fund, _universe()), sort_keys=True)
+    text = _CLEAN_TEXT.replace("15%", "14.7%")
+    violations = validate_commentary(text, input_json)
+    assert any("numbers not in input JSON" in v and "14.7" in v for v in violations)
+
+
 def test_validate_commentary_multiple_violations_all_reported() -> None:
     text = "This fund is a top pick with a yardstick-beating 42% return."
     violations = validate_commentary(text, _source_json())
