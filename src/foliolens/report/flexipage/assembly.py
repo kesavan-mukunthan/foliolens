@@ -356,6 +356,20 @@ def _panel_to_return_series(panel: FundPanel, panel_key: str) -> ReturnSeries:
     )
 
 
+def _to_display_pct(pct: float, n_ranked: int) -> float:
+    """Flip ``peer.py``'s higher-is-better percentile to the rendered convention.
+
+    ``display_pct = 100 + 100/n_ranked − pct`` — lower is better, 1 ≈ top of
+    cohort (``spec-flexicap-page §2/§3``). ``analytics/peer.py`` is never
+    touched (spec-analytics §7 owns that direction); this is a presentation-
+    facing transform applied once, here, before the artifact is written.
+    Clamped to ``[0, 100]``: the algebra guarantees that range exactly, but
+    float subtraction can overshoot it by an epsilon at the boundary.
+    """
+    display = 100.0 + 100.0 / n_ranked - pct
+    return min(100.0, max(0.0, display))
+
+
 def assemble_universe(
     panels: list[FundPanel], *, as_of: date, category: str, yardstick_code: str
 ) -> dict[str, object]:
@@ -363,7 +377,9 @@ def assemble_universe(
 
     Ranks and aggregates are computed once, over the whole cohort, per
     :data:`RANK_SPECS` metric-window — the caller-supplied cohort spec-analytics
-    §7 deliberately stays blind to (it never knows this is "flexicap").
+    §7 deliberately stays blind to (it never knows this is "flexicap"). Every
+    written ``pct`` (latest and history) is then flipped to the display
+    convention (:func:`_to_display_pct`) — lower is better, 1 ≈ top of cohort.
     """
     ranks: dict[str, dict[str, float | None]] = {}
     histories: dict[str, dict[str, ReturnSeries]] = {}
@@ -371,16 +387,44 @@ def assemble_universe(
 
     for key, higher_is_better in RANK_SPECS.items():
         cohort_values = {p.amfi_code: _metric_value(p, key) for p in panels}
-        ranks[key] = percentile_ranks(cohort_values, higher_is_better=higher_is_better)
+        raw_ranks = percentile_ranks(cohort_values, higher_is_better=higher_is_better)
         agg = category_aggregate(cohort_values)
         aggregates[key] = {"median": agg.median, "q1": agg.q1, "q3": agg.q3}
+        n_ranked = agg.count
+        ranks[key] = {
+            fid: (_to_display_pct(pct, n_ranked) if pct is not None else None)
+            for fid, pct in raw_ranks.items()
+        }
 
         panel_key = _RANK_HISTORY_PANEL.get(key)
         if panel_key is not None:
             cohort_panels = {
                 p.amfi_code: _panel_to_return_series(p, panel_key) for p in panels
             }
-            histories[key] = rank_history(cohort_panels, higher_is_better=higher_is_better)
+            raw_history = rank_history(cohort_panels, higher_is_better=higher_is_better)
+            # Same lower-is-better flip, but ``n_ranked`` is per-date here: the
+            # cohort ``rank_history`` ranked against at date ``d`` is exactly
+            # the funds whose returned series carries a point at ``d`` (its
+            # own docstring's "per-date inner selection") — counting that
+            # directly mirrors the exact denominator used inside it.
+            date_counts: dict[date, int] = {}
+            for rs in raw_history.values():
+                for d in rs.dates:
+                    date_counts[d] = date_counts.get(d, 0) + 1
+            histories[key] = {
+                fid: ReturnSeries(
+                    dates=rs.dates,
+                    values=np.array(
+                        [
+                            _to_display_pct(v, date_counts[d])
+                            for d, v in zip(rs.dates, rs.values)
+                        ],
+                        dtype=np.float64,
+                    ),
+                    base=rs.base,
+                )
+                for fid, rs in raw_history.items()
+            }
         else:
             histories[key] = {}
 

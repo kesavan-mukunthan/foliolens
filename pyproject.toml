@@ -11,6 +11,8 @@ dependencies = [
     "ffn",
     "empyrical-reloaded",
     "xlsxwriter",
+    "jinja2",
+    "matplotlib",
 ]
 
 [build-system]

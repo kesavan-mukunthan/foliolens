@@ -67,7 +67,12 @@
       "additionalProperties": false,
       "properties": {
         "date": { "type": "string", "format": "date" },
-        "pct": { "type": "number", "minimum": 0, "maximum": 100 }
+        "pct": {
+          "type": "number",
+          "minimum": 0,
+          "maximum": 100,
+          "description": "Percentile rank at this date: lower = better; 1 ≈ top of cohort."
+        }
       }
     },
     "rankEntry": {
@@ -79,7 +84,8 @@
           "anyOf": [
             { "type": "number", "minimum": 0, "maximum": 100 },
             { "type": "null" }
-          ]
+          ],
+          "description": "Latest percentile rank: lower = better; 1 ≈ top of cohort. Null when the fund has no value for this metric-window."
         },
         "history": {
           "type": "array",

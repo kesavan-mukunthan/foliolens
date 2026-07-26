@@ -1,0 +1,66 @@
+{% extends "layout.html" %}
+{% block title %}FolioLens — Flexicap Universe{% endblock %}
+{% block content %}
+<h1>Flexicap Universe</h1>
+<p>{{ universe.count }} direct-growth flexicap schemes, ranked against the
+  {{ category_benchmark_label }}.</p>
+
+<h2>Category Aggregates</h2>
+<table>
+  <thead>
+    <tr><th>Metric</th><th>Median</th><th>Q1</th><th>Q3</th></tr>
+  </thead>
+  <tbody>
+    {% for row in aggregate_rows %}
+    <tr>
+      <td>{{ row.label }}</td>
+      <td>{{ row.median|pct }}</td>
+      <td>{{ row.q1|pct }}</td>
+      <td>{{ row.q3|pct }}</td>
+    </tr>
+    {% endfor %}
+  </tbody>
+</table>
+
+<h2>Fund Rankings</h2>
+<table data-sortable-table>
+  <thead>
+    <tr>
+      <th data-sortable="true">Fund</th>
+      <th data-sortable="true">Fund House</th>
+      <th data-sortable="true">Return 1Y</th>
+      <th data-sortable="true">Benchmark 1Y</th>
+      <th data-sortable="true">Excess 1Y</th>
+      <th data-sortable="true">Return 3Y</th>
+      <th data-sortable="true">Benchmark 3Y</th>
+      <th data-sortable="true">Excess 3Y</th>
+      <th data-sortable="true">Return 5Y</th>
+      <th data-sortable="true">Benchmark 5Y</th>
+      <th data-sortable="true">Excess 5Y</th>
+      <th data-sortable="true">Volatility (3Y)</th>
+      <th data-sortable="true">Sharpe (3Y)</th>
+      <th data-sortable="true">Rank (3Y %ile)</th>
+    </tr>
+  </thead>
+  <tbody>
+    {% for row in index_rows %}
+    <tr>
+      <td data-value="{{ row.scheme_name }}"><a href="funds/{{ row.amfi_code }}.html">{{ row.scheme_name }}</a></td>
+      <td data-value="{{ row.fund_house }}">{{ row.fund_house }}</td>
+      <td data-value="{{ row.return_1y|dataval }}">{{ row.return_1y|pct }}</td>
+      <td data-value="{{ row.benchmark_return_1y|dataval }}">{{ row.benchmark_return_1y|pct }}</td>
+      <td data-value="{{ row.excess_return_1y|dataval }}" class="{{ row.excess_return_1y|excess_class }}">{{ row.excess_return_1y|pct }}</td>
+      <td data-value="{{ row.return_3y|dataval }}">{{ row.return_3y|pct }}</td>
+      <td data-value="{{ row.benchmark_return_3y|dataval }}">{{ row.benchmark_return_3y|pct }}</td>
+      <td data-value="{{ row.excess_return_3y|dataval }}" class="{{ row.excess_return_3y|excess_class }}">{{ row.excess_return_3y|pct }}</td>
+      <td data-value="{{ row.return_5y|dataval }}">{{ row.return_5y|pct }}</td>
+      <td data-value="{{ row.benchmark_return_5y|dataval }}">{{ row.benchmark_return_5y|pct }}</td>
+      <td data-value="{{ row.excess_return_5y|dataval }}" class="{{ row.excess_return_5y|excess_class }}">{{ row.excess_return_5y|pct }}</td>
+      <td data-value="{{ row.volatility|dataval }}">{{ row.volatility|pct }}</td>
+      <td data-value="{{ row.sharpe|dataval }}">{{ row.sharpe|num }}</td>
+      <td data-value="{{ row.rank_pct|dataval }}">{{ row.rank_pct|pct100 }}</td>
+    </tr>
+    {% endfor %}
+  </tbody>
+</table>
+{% endblock %}

@@ -28,7 +28,7 @@ from foliolens.ingest.land import land, land_index
 from foliolens.ingest.mftool_client import NavRecord
 from foliolens.ingest.scheme_master import SchemeMasterRecord, land_scheme_master
 from foliolens.report.flexipage.assembly import RANK_SPECS
-from foliolens.report.flexipage.runner import load_universe, run
+from foliolens.report.flexipage.runner import IndexAnomalyError, load_universe, run
 from foliolens.data_access import DataAccess
 
 SCHEMA_PATH = Path(__file__).parent.parent / "schemas" / "flexipage-1.schema.json"
@@ -270,12 +270,19 @@ def test_mature_funds_have_full_5y_panel(artifact: dict[str, Any]) -> None:
 
 
 def test_ranks_form_valid_distribution_per_metric_window(artifact: dict[str, Any]) -> None:
+    """Display convention is lower-is-better (amendment 1): the best fund's
+    ``pct`` is ``100/n_ranked`` (≈1 for a large cohort), the worst is 100 —
+    the flip of ``analytics/peer.py``'s own higher-is-better direction,
+    applied once in ``assemble_universe``.
+    """
     for key in RANK_SPECS:
         pcts = [f["ranks"][key]["pct"] for f in artifact["funds"]]
         present = [p for p in pcts if p is not None]
         if not present:
             continue
+        n = len(present)
         assert all(0.0 < p <= 100.0 for p in present)
+        assert min(present) == pytest.approx(100.0 / n)
         assert max(present) == pytest.approx(100.0)
 
 
@@ -325,3 +332,67 @@ def test_no_nan_or_inf_anywhere(artifact: dict[str, Any]) -> None:
 def test_commentary_is_null_placeholder(artifact: dict[str, Any]) -> None:
     for f in artifact["funds"]:
         assert f["commentary"] is None
+
+
+# ---------------------------------------------------------------------------
+# Index-level anomaly guard (§7 F1 addition): a corrupted splice in a
+# manually-combined source file produced a phantom +33% day at a chunk
+# boundary in the real data once already — endpoint/continuity checks can't
+# catch an interior basis break, so the runner validates every loaded index
+# series point-to-point before it feeds any computation.
+# ---------------------------------------------------------------------------
+
+
+def test_index_anomaly_aborts_build(tmp_path: Path) -> None:
+    data_dir = tmp_path / "data"
+    data_dir.mkdir()
+
+    nav_records = [
+        NavRecord(amfi_code="AAAA01", date=d, nav=nav)
+        for d, nav in _daily_series(_START, _MATURE_DAYS, seed=1)
+    ]
+    land(nav_records, data_dir)
+
+    land_scheme_master(
+        [
+            SchemeMasterRecord(
+                amfi_code="AAAA01",
+                scheme_name="Alpha Flexi Cap Fund - Direct Plan - Growth",
+                fund_house="Alpha Mutual Fund",
+                scheme_category="Equity Scheme - Flexi Cap Fund",
+                sebi_category="flexi_cap",
+                plan="direct",
+                option="growth",
+            )
+        ],
+        data_dir,
+    )
+
+    # The category yardstick (NIFTY500TRI) with one corrupted interior day:
+    # a lone +33% splice, otherwise an unremarkable ~0.8% daily-vol walk.
+    levels = _daily_series(_START, _MATURE_DAYS, seed=10, vol=0.008)
+    bad_date, bad_level = levels[100]
+    spiked = (bad_level * Decimal("1.33")).quantize(Decimal("0.000001"))
+    levels[100] = (bad_date, spiked)
+    index_records = [
+        IndexRecord(index_code="NIFTY500TRI", date=d, level=level) for d, level in levels
+    ]
+    land_index(index_records, data_dir)
+
+    benchmark_map_path = tmp_path / "benchmark_map.csv"
+    _write_benchmark_map(benchmark_map_path, [])
+
+    rf_path = tmp_path / "iima_rf.csv"
+    _write_rf_csv(rf_path, _START, _START + timedelta(days=_MATURE_DAYS + 60))
+
+    with pytest.raises(IndexAnomalyError) as exc_info:
+        run(
+            data_dir,
+            tmp_path / "out" / "metrics.json",
+            rf_path=rf_path,
+            benchmark_map_path=benchmark_map_path,
+        )
+
+    message = str(exc_info.value)
+    assert "NIFTY500TRI" in message
+    assert bad_date.isoformat() in message
