@@ -43,9 +43,51 @@
   .commentary { background: #f9f9f9; border: 1px solid #e5e5e5; padding: 1rem; border-radius: 0.4rem; }
   footer.site-footer { border-top: 1px solid #ddd; padding: 1rem 1.5rem; font-size: 0.78rem; color: #666; }
   footer.site-footer p { max-width: 62rem; margin: 0.3rem auto; }
+
+  /* Print / PDF (F3, spec-flexicap-page §4/§7-F3) — WeasyPrint renders this
+     same layout, no separate PDF template. A4 with sane margins; nav/sort-JS
+     hidden (they're either non-interactive or actively broken on paper);
+     tables and chart figures avoid splitting mid-block across a page break;
+     the footer (footnote + disclaimer) repeats on every printed page via
+     @page rather than living once at the end of the document. */
+  @media print {
+    header.site-header .nav-controls { display: none; }
+  }
+  @page {
+    size: A4;
+    margin: 2cm 1.5cm;
+    @bottom-center {
+      content: element(pdf-footer);
+    }
+  }
+  .pdf-footer { display: none; }
+  @media print {
+    .pdf-footer {
+      display: block;
+      position: running(pdf-footer);
+      font-size: 0.65rem;
+      color: #666;
+      max-width: 18cm;
+      line-height: 1.3;
+    }
+    .pdf-footer p { margin: 0.15rem 0; }
+    table, .chart-block { break-inside: avoid; page-break-inside: avoid; }
+    /* Background fills (excess-return cells) are dropped by default in most
+       print pipelines, incl. WeasyPrint — without this, a PDF with
+       invisible white-on-white excess columns is a build failure, not a
+       style nit (spec-flexicap-page §7-F3). */
+    .excess-pos, .excess-neg {
+      print-color-adjust: exact;
+      -webkit-print-color-adjust: exact;
+    }
+  }
 </style>
 </head>
 <body>
+<div class="pdf-footer">
+  <p>{{ footnote }}</p>
+  <p>{{ disclaimer }}</p>
+</div>
 <header class="site-header">
   <a class="brand" href="{{ root_prefix }}index.html">FolioLens — Flexicap</a>
   <div class="nav-controls">

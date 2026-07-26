@@ -19,6 +19,7 @@ from typing import Any
 from jinja2 import Environment, FileSystemLoader, select_autoescape
 
 from . import charts, presentation
+from .pdf import render_pdfs
 from .strings import DISCLAIMER, SURVIVORSHIP_FOOTNOTE, TIER_FALLBACK_LABEL
 
 _HERE = Path(__file__).parent
@@ -146,6 +147,11 @@ def main(argv: list[str] | None = None) -> None:
     )
     parser.add_argument("--metrics", required=True, type=Path, metavar="PATH")
     parser.add_argument("--out", required=True, type=Path, metavar="DIR")
+    parser.add_argument(
+        "--pdf",
+        action="store_true",
+        help="also render a print-CSS PDF per fund page + index.pdf (F3)",
+    )
     args = parser.parse_args(argv)
 
     summary = render_site(args.metrics, args.out)
@@ -156,6 +162,11 @@ def main(argv: list[str] | None = None) -> None:
             f"{len(summary.funds_with_all_charts_skipped)} funds with all charts "
             f"skipped: {', '.join(summary.funds_with_all_charts_skipped)}"
         )
+
+    if args.pdf:
+        pdf_summary = render_pdfs(args.out)
+        print(f"wrote {pdf_summary.pdf_count} PDFs to {args.out}")
+        print(f"PDF total size: {pdf_summary.total_size_bytes} bytes")
 
 
 if __name__ == "__main__":
