@@ -20,6 +20,7 @@ import time
 from pathlib import Path
 from typing import Any, cast
 
+from ..data_access import DATA_DIR_ENV_VAR, default_data_dir
 from .land import land
 from .mftool_client import fetch_nav_history, fetch_scheme_codes, normalise
 from .scheme_master import SchemeMasterRecord, land_scheme_master, scheme_record
@@ -189,7 +190,14 @@ def main() -> None:
     parser = argparse.ArgumentParser(
         description="Land universe NAV shards from mftool."
     )
-    parser.add_argument("--data-dir", required=True, type=Path, metavar="PATH")
+    parser.add_argument(
+        "--data-dir",
+        required=False,
+        default=None,
+        type=Path,
+        metavar="PATH",
+        help=f"defaults to ${DATA_DIR_ENV_VAR} if set",
+    )
     parser.add_argument(
         "--consolidate",
         action="store_true",
@@ -209,6 +217,10 @@ def main() -> None:
     )
     args = parser.parse_args()
 
+    data_dir = args.data_dir or default_data_dir()
+    if data_dir is None:
+        parser.error(f"--data-dir is required (or set ${DATA_DIR_ENV_VAR})")
+
     shard: tuple[int, int] | None = None
     if args.shard is not None:
         i_str, n_str = args.shard.split("/")
@@ -221,7 +233,7 @@ def main() -> None:
         level=logging.INFO, format="%(asctime)s %(levelname)s %(message)s"
     )
     land_universe(
-        args.data_dir,
+        data_dir,
         delay_s=args.delay_s,
         max_retries=args.max_retries,
         shard=shard,
@@ -233,7 +245,7 @@ def main() -> None:
             # after all workers finish, not inside a single sharded worker.
             _LOG.info("--shard set: skipping consolidate; run it once after all workers finish")
         else:
-            out = consolidate(args.data_dir)
+            out = consolidate(data_dir)
             print(f"consolidated → {out}")
 
 
