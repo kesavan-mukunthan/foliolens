@@ -12,15 +12,20 @@ The descriptive-only contract is gated at **runtime**, not just by the test
 suite: a v1 (claude-haiku-4-5) smoke test surfaced inverted comparatives,
 benchmark/category-median conflation, and misread percentile direction; a v2
 (claude-sonnet-4-6) smoke test fixed those but still overran the word budget
-and, once, wrote "year-to-date" for a closed calendar year. Since the
-remaining violations are the model's, not the pipeline's, :func:`validate_commentary`
-checks every real response before it's persisted, and :func:`generate_fund_commentary`
-retries once — with the violated rules named back to the model — before
-giving up. Commentary is never load-bearing (§5): an absent
-``ANTHROPIC_API_KEY``, or a fund whose response still violates the contract
-after that one retry, leaves that fund's ``commentary`` as ``null`` and the
-build continues. Calls are sequential — no concurrency (§5 spec text: one
-call per fund at build time).
+and, once, wrote "year-to-date" for a closed calendar year; a v3 smoke test
+was clean on every named rule but once quoted a raw fraction instead of a
+percentage. v4 closes that (a formatting rule) and, separately, removes the
+stated-benchmark/tier fields from the model's input entirely
+(:func:`build_user_payload`) — the source of the benchmark/category-median
+conflation class is now absent from the prompt, not just discouraged in it.
+Since the remaining violations are the model's, not the pipeline's,
+:func:`validate_commentary` checks every real response before it's
+persisted, and :func:`generate_fund_commentary` retries once — with the
+violated rules named back to the model — before giving up. Commentary is
+never load-bearing (§5): an absent ``ANTHROPIC_API_KEY``, or a fund whose
+response still violates the contract after that one retry, leaves that
+fund's ``commentary`` as ``null`` and the build continues. Calls are
+sequential — no concurrency (§5 spec text: one call per fund at build time).
 """
 from __future__ import annotations
 
@@ -35,6 +40,8 @@ from datetime import datetime, timezone
 from pathlib import Path
 from typing import Any, cast
 
+from .render.presentation import benchmark_display_name
+
 _LOG = logging.getLogger(__name__)
 
 #: Fixed per spec-flexicap-page §5 — never varied per call. Relational
@@ -45,8 +52,8 @@ _LOG = logging.getLogger(__name__)
 MODEL = "claude-sonnet-4-6"
 
 #: Persisted alongside every commentary result; also the version this
-#: module's :data:`COMMENTARY_V3_SYSTEM_PROMPT` is hashed against (§5).
-PROMPT_VERSION = "commentary-v3"
+#: module's :data:`COMMENTARY_V4_SYSTEM_PROMPT` is hashed against (§5).
+PROMPT_VERSION = "commentary-v4"
 
 #: One retry, on a validation violation (:func:`validate_commentary`) or a
 #: transport exception alike — a second failure gets ``commentary: null``
@@ -84,17 +91,20 @@ BANNED_VOCABULARY: tuple[str, ...] = (
 _NUMERAL_TOKEN_RE = re.compile(r"\d*\.\d+|\d{2,}")
 _PARAGRAPH_SPLIT_RE = re.compile(r"\n\s*\n")
 
-#: The commentary-v3 system prompt, copied **verbatim** from
+#: The commentary-v4 system prompt, copied **verbatim** from
 #: ``specs/spec-flexicap-page.md`` §5 — the single source of truth this
 #: module (and the F4 test that diffs it against the spec file) both read.
 #: Do not paraphrase, reflow, or reword; the spec text itself is the contract.
-#: v2 (vs v1) added explicit relational-fidelity rules. v3 (vs v2) adds two
+#: v2 (vs v1) added explicit relational-fidelity rules. v3 (vs v2) added two
 #: more, verbatim, after a v2 smoke test on claude-sonnet-4-6 still wrote
 #: "yardstick" (the internal comparator label) and "year-to-date" for a
 #: closed calendar year — both rules now also gate at runtime
-#: (:func:`validate_commentary`), since the remaining violations are the
-#: model's, not the pipeline's.
-COMMENTARY_V3_SYSTEM_PROMPT = """You are writing a short factual commentary for a mutual fund
+#: (:func:`validate_commentary`). v4 (vs v3) adds one more: the v3 smoke test
+#: was clean on every named rule but still, once, quoted a raw fraction
+#: (0.0113) instead of a percentage — this rule closes that, and the payload
+#: change in :func:`build_user_payload` (dropping ``benchmark.stated``/
+#: ``tier``) removes the mislabelling class those two fields made possible.
+COMMENTARY_V4_SYSTEM_PROMPT = """You are writing a short factual commentary for a mutual fund
 analytics page. You will receive a JSON object containing computed
 metrics for one fund and its category context.
 
@@ -127,6 +137,9 @@ Rules — absolute:
 - Neutral third-person analyst voice. No superlatives, no
   marketing language, no exclamation marks. Always use the %
   symbol, never the word "percent".
+- Quote figures at no more than two decimal places. Express returns,
+  volatility, tracking error and drawdown at percentage scale with
+  the % symbol; never as raw fractions.
 - British English. 100-150 words, two paragraphs.
 
 Structure:
@@ -164,15 +177,24 @@ CORRECTION_MESSAGE_TEMPLATE = (
 
 
 def build_user_payload(fund: Mapping[str, Any], universe: Mapping[str, Any]) -> dict[str, Any]:
-    """The fund's artifact entry (metrics, calendar_years, ranks, benchmark
-    block) plus universe aggregates — verbatim, nothing recomputed
-    (``spec-flexicap-page §5``).
+    """The fund's artifact entry (metrics, calendar_years, ranks) plus
+    universe aggregates — verbatim, nothing recomputed (``spec-flexicap-page
+    §5``). The stated benchmark and its tier (``fund.benchmark.stated`` /
+    ``.tier``) are page furniture for the tier-fallback footnote, not
+    commentary material — they are never sent to the model, which removes
+    the benchmark/stated conflation class entirely rather than relying on a
+    prompt rule to suppress it. The only comparator identity the model
+    receives is the category benchmark's display name, under the single
+    flat field ``category_benchmark`` (e.g. "Nifty 500 TRI") — the same
+    name F2 renders on the page (:func:`.render.presentation.benchmark_display_name`),
+    so the commentary and the page it sits on never disagree about what the
+    comparator is called.
     """
     return {
         "amfi_code": fund["amfi_code"],
         "scheme_name": fund["scheme_name"],
         "fund_house": fund["fund_house"],
-        "benchmark": fund["benchmark"],
+        "category_benchmark": benchmark_display_name(fund["benchmark"]["yardstick"]),
         "metrics": fund["metrics"],
         "calendar_years": fund["calendar_years"],
         "ranks": fund["ranks"],
@@ -372,7 +394,7 @@ def generate_fund_commentary(
 
     for attempt in range(1, attempts + 1):
         try:
-            text = transport(COMMENTARY_V3_SYSTEM_PROMPT, messages).strip()
+            text = transport(COMMENTARY_V4_SYSTEM_PROMPT, messages).strip()
         except Exception as exc:  # noqa: BLE001 - never load-bearing (spec-flexicap-page §5)
             _LOG.warning(
                 "commentary attempt %d/%d failed for %s: %r",

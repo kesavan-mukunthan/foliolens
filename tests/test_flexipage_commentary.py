@@ -26,7 +26,7 @@ from foliolens.report.flexipage.commentary import (
     CommentaryResult,
     CommentarySummary,
     CommentaryTransport,
-    COMMENTARY_V3_SYSTEM_PROMPT,
+    COMMENTARY_V4_SYSTEM_PROMPT,
     build_user_payload,
     generate_fund_commentary,
     run,
@@ -47,13 +47,13 @@ def _normalise(text: str) -> str:
 
 def _spec_commentary_prompt() -> str:
     text = SPEC_PATH.read_text(encoding="utf-8")
-    match = re.search(r"### commentary-v3.*?```\n(.*?)```", text, re.S)
-    assert match is not None, "could not locate the commentary-v3 fenced block in the spec"
+    match = re.search(r"### commentary-v4.*?```\n(.*?)```", text, re.S)
+    assert match is not None, "could not locate the commentary-v4 fenced block in the spec"
     return match.group(1)
 
 
 def test_prompt_constant_matches_spec_verbatim() -> None:
-    assert _normalise(COMMENTARY_V3_SYSTEM_PROMPT) == _normalise(_spec_commentary_prompt())
+    assert _normalise(COMMENTARY_V4_SYSTEM_PROMPT) == _normalise(_spec_commentary_prompt())
 
 
 def test_banned_vocabulary_includes_v3_additions() -> None:
@@ -172,10 +172,26 @@ def test_validate_commentary_flags_every_banned_term(term: str) -> None:
     assert any("banned vocabulary" in v and term in v for v in violations)
 
 
-def test_validate_commentary_yardstick_flagged_even_though_it_is_a_json_key() -> None:
-    # "yardstick" is a real field name in the fixture's benchmark block --
-    # confirms the check is against the *output text*, not the input JSON.
-    assert "yardstick" in _source_json()
+def test_build_user_payload_drops_stated_and_tier_uses_category_benchmark() -> None:
+    """v4: the stated benchmark and its tier are page furniture, never
+    commentary material -- the only comparator identity sent to the model
+    is the category yardstick's display name, under one flat field.
+    """
+    payload = build_user_payload(_fund(), _universe())
+    assert "benchmark" not in payload
+    assert payload["category_benchmark"] == "Nifty 500 TRI"
+
+    payload_json = json.dumps(payload, sort_keys=True)
+    assert "stated" not in payload_json
+    assert "tier1" not in payload_json
+    assert "NIFTY500TRI" not in payload_json  # the raw code never leaks either
+
+
+def test_validate_commentary_yardstick_still_banned_though_absent_from_payload() -> None:
+    # The word no longer appears anywhere in the input JSON (v4 dropped the
+    # nested benchmark block) -- confirms the check is against the *output
+    # text* regardless of whether the input could have prompted it.
+    assert "yardstick" not in _source_json()
     text = _CLEAN_TEXT.replace("category benchmark", "category yardstick")
     violations = validate_commentary(text, _source_json())
     assert any("yardstick" in v for v in violations)
@@ -241,7 +257,7 @@ def test_validate_commentary_multiple_violations_all_reported() -> None:
 
 def test_generate_fund_commentary_success_when_clean() -> None:
     def stub(system: str, messages: list[dict[str, str]]) -> str:
-        assert system == COMMENTARY_V3_SYSTEM_PROMPT
+        assert system == COMMENTARY_V4_SYSTEM_PROMPT
         assert len(messages) == 1
         assert messages[0]["role"] == "user"
         assert "AAAA01" in messages[0]["content"]
@@ -251,7 +267,7 @@ def test_generate_fund_commentary_success_when_clean() -> None:
     assert isinstance(result, CommentaryResult)
     assert result.text == _CLEAN_TEXT
     assert result.model == MODEL == "claude-sonnet-4-6"
-    assert result.prompt_version == PROMPT_VERSION == "commentary-v3"
+    assert result.prompt_version == PROMPT_VERSION == "commentary-v4"
     datetime.fromisoformat(result.generated_at)  # does not raise
 
 
@@ -351,7 +367,7 @@ def test_run_persists_commentary_fields_in_place(tmp_path: Path) -> None:
         commentary = fund["commentary"]
         assert commentary["text"] == _CLEAN_TEXT
         assert commentary["model"] == MODEL
-        assert commentary["prompt_version"] == "commentary-v3"
+        assert commentary["prompt_version"] == "commentary-v4"
         datetime.fromisoformat(commentary["generated_at"])
 
 

@@ -458,7 +458,7 @@ def test_commentary_block_shown_when_present(tmp_path: Path) -> None:
     fund["commentary"] = {
         "text": "The fund tracked its category benchmark closely over the period.",
         "model": "claude-sonnet-4-6",
-        "prompt_version": "commentary-v3",
+        "prompt_version": "commentary-v4",
         "generated_at": "2026-07-14T00:00:00+00:00",
     }
     artifact = {

@@ -70,7 +70,7 @@ recomputed here — the runner calls existing functions only.
     "rolling": {panel_name: [{"date": d, "value": v}]},
     "ranks": {metric_window: {"pct": v, "history": [{"date": d, "pct": v}]}},
     // pct (latest + history): lower = better; 1 ≈ top of cohort
-    "commentary": {"text": str, "model": str, "prompt_version": "commentary-v3",
+    "commentary": {"text": str, "model": str, "prompt_version": "commentary-v4",
                     "generated_at": ts} | null
   }]
 }
@@ -102,9 +102,16 @@ re-rounding outside the presentation layer.
 
 - One Anthropic API call per fund at build time, model **claude-sonnet-4-6**
   (relational fidelity across ~30 figures per fund is the binding constraint;
-  cost is immaterial at this scale), system prompt = `commentary-v3`
+  cost is immaterial at this scale), system prompt = `commentary-v4`
   (verbatim below), user message = the fund's entry from metrics.json
-  (metrics, calendar_years, ranks, universe aggregates). Persisted into
+  (metrics, calendar_years, ranks, universe aggregates) **minus**
+  `benchmark.stated`/`.tier` — those are page furniture for the tier-fallback
+  footnote, not commentary material, and are never sent to the model. The
+  only comparator identity the model receives is a single flat
+  `category_benchmark` field holding the category yardstick's display name
+  (e.g. `"Nifty 500 TRI"` — the same name F2 renders on the page), which
+  removes the benchmark/stated-vs-category-median conflation class entirely
+  rather than relying on a prompt rule to suppress it. Persisted into
   metrics.json with model + prompt_version.
 - Runs **locally only** this milestone; `ANTHROPIC_API_KEY` from env/`.env`
   (gitignored). Key never in either repo or artifacts. Build proceeds with
@@ -116,14 +123,17 @@ re-rounding outside the presentation layer.
   trust" moved to a runtime gate): every real response is checked before
   being persisted — word count 100-170, exactly two paragraphs, the banned-
   vocabulary list absent, and the no-new-numbers rule (every numeral token
-  of 2+ digits or any decimal must substring-match the input JSON). On a
-  violation, one retry is sent with the invalid response plus a correction
-  message naming the violated rules; a second failure of either kind
-  (transport error or violation) leaves `commentary: null`, logged with the
-  named violations. The check is one pure function, used identically by the
-  runtime path and the F4 test suite, so it can never drift between them.
+  of 2+ digits or any decimal must match some input JSON value, either as a
+  literal substring or at ×1/×100/×0.01 scale rounded to the token's own
+  decimal precision — the artifact stores fractions, prose writes percent).
+  On a violation, one retry is sent with the invalid response plus a
+  correction message naming the violated rules; a second failure of either
+  kind (transport error or violation) leaves `commentary: null`, logged
+  with the named violations. The check is one pure function, used
+  identically by the runtime path and the F4 test suite, so it can never
+  drift between them.
 
-### commentary-v3 (system prompt, verbatim — hash this text as the version)
+### commentary-v4 (system prompt, verbatim — hash this text as the version)
 
 ```
 You are writing a short factual commentary for a mutual fund
@@ -159,6 +169,9 @@ Rules — absolute:
 - Neutral third-person analyst voice. No superlatives, no
   marketing language, no exclamation marks. Always use the %
   symbol, never the word "percent".
+- Quote figures at no more than two decimal places. Express returns,
+  volatility, tracking error and drawdown at percentage scale with
+  the % symbol; never as raw fractions.
 - British English. 100-150 words, two paragraphs.
 
 Structure:
