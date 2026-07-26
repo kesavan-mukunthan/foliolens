@@ -9,8 +9,9 @@ from decimal import Decimal
 from pathlib import Path
 
 import pyarrow as pa
+import pytest
 
-from foliolens.data_access import DataAccess
+from foliolens.data_access import DATA_DIR_ENV_VAR, DataAccess, default_data_dir
 
 FIXTURES = Path(__file__).parent.parent / "fixtures" / "nav_snapshots"
 
@@ -63,3 +64,19 @@ def test_load_nav_panel_nav_is_decimal128() -> None:
     nav_type = tbl.schema.field("nav").type
     assert pa.types.is_decimal(nav_type), f"nav must stay decimal, got {nav_type}"
     assert not pa.types.is_floating(nav_type)
+
+
+# ---------------------------------------------------------------------------
+# FOLIOLENS_DATA_DIR — the single documented canonical-root fallback
+# (CLAUDE.md "Source of truth & determinism": one data root, resolved one way).
+# ---------------------------------------------------------------------------
+
+
+def test_default_data_dir_unset_is_none(monkeypatch: pytest.MonkeyPatch) -> None:
+    monkeypatch.delenv(DATA_DIR_ENV_VAR, raising=False)
+    assert default_data_dir() is None
+
+
+def test_default_data_dir_reads_env_var(monkeypatch: pytest.MonkeyPatch) -> None:
+    monkeypatch.setenv(DATA_DIR_ENV_VAR, "/some/canonical/root")
+    assert default_data_dir() == Path("/some/canonical/root")
