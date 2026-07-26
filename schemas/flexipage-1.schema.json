@@ -1,0 +1,164 @@
+{
+  "$schema": "https://json-schema.org/draft/2020-12/schema",
+  "$id": "https://foliolens.internal/schemas/flexipage-1.schema.json",
+  "title": "flexipage-1 metrics.json",
+  "description": "spec-flexicap-page §3 durable artifact, F1 (batch runner) shape.",
+  "type": "object",
+  "required": ["schema_version", "as_of", "universe", "funds"],
+  "additionalProperties": false,
+  "properties": {
+    "schema_version": { "const": "flexipage-1" },
+    "as_of": { "type": "string", "format": "date" },
+    "universe": {
+      "type": "object",
+      "required": ["category", "count", "yardstick", "aggregates"],
+      "additionalProperties": false,
+      "properties": {
+        "category": { "type": "string" },
+        "count": { "type": "integer", "minimum": 0 },
+        "yardstick": { "type": "string" },
+        "aggregates": {
+          "type": "object",
+          "additionalProperties": { "$ref": "#/$defs/aggregate" }
+        }
+      }
+    },
+    "funds": {
+      "type": "array",
+      "items": { "$ref": "#/$defs/fundEntry" }
+    }
+  },
+  "$defs": {
+    "nullableNumber": {
+      "type": ["number", "null"]
+    },
+    "aggregate": {
+      "type": "object",
+      "required": ["median", "q1", "q3"],
+      "additionalProperties": false,
+      "properties": {
+        "median": { "$ref": "#/$defs/nullableNumber" },
+        "q1": { "$ref": "#/$defs/nullableNumber" },
+        "q3": { "$ref": "#/$defs/nullableNumber" }
+      }
+    },
+    "benchmarkBlock": {
+      "type": "object",
+      "required": ["stated", "tier", "yardstick"],
+      "additionalProperties": false,
+      "properties": {
+        "stated": { "type": ["string", "null"] },
+        "tier": { "type": ["string", "null"] },
+        "yardstick": { "type": "string" }
+      }
+    },
+    "seriesPoint": {
+      "type": "object",
+      "required": ["date", "value"],
+      "additionalProperties": false,
+      "properties": {
+        "date": { "type": "string", "format": "date" },
+        "value": { "type": "number" }
+      }
+    },
+    "rankHistoryPoint": {
+      "type": "object",
+      "required": ["date", "pct"],
+      "additionalProperties": false,
+      "properties": {
+        "date": { "type": "string", "format": "date" },
+        "pct": { "type": "number", "minimum": 0, "maximum": 100 }
+      }
+    },
+    "rankEntry": {
+      "type": "object",
+      "required": ["pct", "history"],
+      "additionalProperties": false,
+      "properties": {
+        "pct": {
+          "anyOf": [
+            { "type": "number", "minimum": 0, "maximum": 100 },
+            { "type": "null" }
+          ]
+        },
+        "history": {
+          "type": "array",
+          "items": { "$ref": "#/$defs/rankHistoryPoint" }
+        }
+      }
+    },
+    "alphaResult": {
+      "type": "object",
+      "required": ["value", "t_stat", "n", "window_start", "window_end"],
+      "additionalProperties": false,
+      "properties": {
+        "value": { "type": "number" },
+        "t_stat": { "type": "number" },
+        "n": { "type": "integer", "minimum": 1 },
+        "window_start": { "type": "string", "format": "date" },
+        "window_end": { "type": "string", "format": "date" }
+      }
+    },
+    "commentary": {
+      "type": "object",
+      "required": ["text", "model", "prompt_version", "generated_at"],
+      "additionalProperties": false,
+      "properties": {
+        "text": { "type": "string" },
+        "model": { "type": "string" },
+        "prompt_version": { "type": "string" },
+        "generated_at": { "type": "string" }
+      }
+    },
+    "fundEntry": {
+      "type": "object",
+      "required": [
+        "amfi_code",
+        "scheme_name",
+        "fund_house",
+        "benchmark",
+        "metrics",
+        "calendar_years",
+        "alpha",
+        "rolling",
+        "ranks",
+        "commentary"
+      ],
+      "additionalProperties": false,
+      "properties": {
+        "amfi_code": { "type": "string" },
+        "scheme_name": { "type": "string" },
+        "fund_house": { "type": "string" },
+        "benchmark": { "$ref": "#/$defs/benchmarkBlock" },
+        "metrics": {
+          "type": "object",
+          "additionalProperties": { "$ref": "#/$defs/nullableNumber" }
+        },
+        "calendar_years": {
+          "type": "object",
+          "additionalProperties": { "$ref": "#/$defs/nullableNumber" }
+        },
+        "alpha": {
+          "type": "object",
+          "additionalProperties": {
+            "anyOf": [{ "$ref": "#/$defs/alphaResult" }, { "type": "null" }]
+          }
+        },
+        "rolling": {
+          "type": "object",
+          "additionalProperties": {
+            "type": "array",
+            "items": { "$ref": "#/$defs/seriesPoint" }
+          }
+        },
+        "ranks": {
+          "type": "object",
+          "additionalProperties": { "$ref": "#/$defs/rankEntry" }
+        },
+        "commentary": {
+          "anyOf": [{ "$ref": "#/$defs/commentary" }, { "type": "null" }]
+        }
+      }
+    }
+  }
+}

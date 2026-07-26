@@ -34,4 +34,5 @@ dev = [
     "ruff>=0.15.8",
     "mypy>=2.1.0",
     "pytest>=9.0",
+    "jsonschema>=4.23",
 ]
