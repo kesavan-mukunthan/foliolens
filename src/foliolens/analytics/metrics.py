@@ -92,14 +92,21 @@ def sortino(rs: ReturnSeries, rf: ReturnSeries) -> float:
     """Annualised Sortino ratio, MAR = rf (an rf *series*, never a scalar).
 
     ``(mean(r − rf) × 12) / downside_deviation`` over the aligned overlap.
-    Matches ``empyrical.sortino_ratio(..., period='monthly')``.
+    Matches ``empyrical.sortino_ratio(..., period='monthly')``. Undefined when
+    the series never underperforms the MAR (zero downside deviation) — fails
+    loud with the same "undefined" signal as the other zero-denominator ratios
+    (``information_ratio``'s zero-TE, ``treynor``'s zero-beta), rather than
+    surfacing a raw ``ZeroDivisionError`` to the caller.
     """
     r, f = align(rs, rf)
     if len(r) < 2:
         raise ValueError(f"sortino needs >= 2 overlapping returns, got {len(r)}")
     excess = r - f
+    downside = _downside_deviation(excess)
+    if downside == 0.0:
+        raise ValueError("sortino undefined: downside deviation is zero")
     numerator = float(np.mean(excess)) * _MONTHS_PER_YEAR
-    return numerator / _downside_deviation(excess)
+    return numerator / downside
 
 
 def calmar(rs: ReturnSeries) -> float:

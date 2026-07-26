@@ -115,3 +115,18 @@ def test_all_negative_downside_deviation_positive() -> None:
     neg = returns_series([-0.02, -0.01, -0.03])
     rf = returns_series([0.001, 0.001, 0.001])
     assert downside_deviation(neg, rf) > 0
+
+
+# ---------------------------------------------------------------------------
+# Sortino — zero downside deviation (never underperforms MAR) fails loud
+# ---------------------------------------------------------------------------
+
+
+def test_sortino_zero_downside_deviation_raises() -> None:
+    # Every month beats rf → no downside at all → Sortino is undefined, not a
+    # ZeroDivisionError (a real batch-runner case: a fund that never
+    # underperformed rf over some trailing window).
+    fund = returns_series([0.02, 0.03, 0.01, 0.04])
+    rf = returns_series([0.001, 0.001, 0.001, 0.001])
+    with pytest.raises(ValueError, match="undefined"):
+        sortino(fund, rf)
