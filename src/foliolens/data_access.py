@@ -5,6 +5,7 @@ Path root is local (data/raw/) for step 0; swap to gs:// at step 4.
 """
 from __future__ import annotations
 
+import os
 from collections.abc import Sequence
 from datetime import date
 from decimal import Decimal
@@ -22,6 +23,19 @@ from .benchmark_map import (
     load_benchmark_map,
 )
 from .model.value_objects import NavSeries
+
+#: Env var naming the canonical data root (nav.parquet, index_nav.parquet,
+#: scheme_master.parquet all in one directory) — every ``--data-dir`` CLI
+#: flag falls back to this so the root doesn't have to be retyped (and
+#: mistyped) on every invocation. ``CLAUDE.md``'s "Source of truth &
+#: determinism" section documents the current canonical path.
+DATA_DIR_ENV_VAR = "FOLIOLENS_DATA_DIR"
+
+
+def default_data_dir() -> Path | None:
+    """``FOLIOLENS_DATA_DIR`` as a ``Path``, or ``None`` if unset."""
+    raw = os.environ.get(DATA_DIR_ENV_VAR)
+    return Path(raw) if raw else None
 
 
 class DataAccess:

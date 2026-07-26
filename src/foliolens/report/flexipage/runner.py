@@ -29,7 +29,7 @@ from foliolens.benchmark_map import (
     DEFAULT_BENCHMARK_MAP,
     TIER1,
 )
-from foliolens.data_access import DataAccess
+from foliolens.data_access import DATA_DIR_ENV_VAR, DataAccess, default_data_dir
 from foliolens.ingest.iima import rf_investment
 from foliolens.model.investments import Benchmark, ShareClass, benchmark_from_index
 from foliolens.model.sources import PricedSource
@@ -242,7 +242,14 @@ def main(argv: list[str] | None = None) -> None:
     parser = argparse.ArgumentParser(
         description="F1 batch runner: flexicap direct-growth universe -> metrics.json"
     )
-    parser.add_argument("--data-dir", required=True, type=Path, metavar="PATH")
+    parser.add_argument(
+        "--data-dir",
+        required=False,
+        default=None,
+        type=Path,
+        metavar="PATH",
+        help=f"defaults to ${DATA_DIR_ENV_VAR} if set",
+    )
     parser.add_argument("--out", required=True, type=Path, metavar="PATH")
     parser.add_argument(
         "--rf-path",
@@ -263,10 +270,14 @@ def main(argv: list[str] | None = None) -> None:
     )
     args = parser.parse_args(argv)
 
+    data_dir = args.data_dir or default_data_dir()
+    if data_dir is None:
+        parser.error(f"--data-dir is required (or set ${DATA_DIR_ENV_VAR})")
+
     logging.basicConfig(level=logging.INFO, format="%(levelname)s %(message)s")
     try:
         summary = run(
-            args.data_dir, args.out, rf_path=args.rf_path, as_of=args.as_of
+            data_dir, args.out, rf_path=args.rf_path, as_of=args.as_of
         )
     except RuntimeError as exc:
         print(f"BUILD ABORTED: {exc}", file=sys.stderr)
