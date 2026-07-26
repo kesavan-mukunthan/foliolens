@@ -1,9 +1,10 @@
 """F4 commentary tests — offline only; the suite never calls the API.
 
 Covers the F4 acceptance surface (``specs/spec-flexicap-page.md §7-F4``):
-stub transport, no-new-numbers, word count 80-170, banned vocabulary absent,
-null-tolerance (missing key -> null commentary), and the system prompt
-constant matching the spec text verbatim.
+the ``validate_commentary`` pure function (shared by the runtime retry path
+and this suite — no parallel check that could drift), the one-retry-then-null
+runtime path, null-tolerance (missing key -> null commentary), and the
+system prompt constant matching the spec text verbatim.
 """
 from __future__ import annotations
 
@@ -16,52 +17,23 @@ from typing import Any
 import pytest
 
 from foliolens.report.flexipage.commentary import (
+    BANNED_VOCABULARY,
     MAX_RETRIES,
+    MAX_WORDS,
+    MIN_WORDS,
     MODEL,
     PROMPT_VERSION,
     CommentaryResult,
     CommentarySummary,
-    COMMENTARY_V2_SYSTEM_PROMPT,
+    CommentaryTransport,
+    COMMENTARY_V3_SYSTEM_PROMPT,
     build_user_payload,
     generate_fund_commentary,
     run,
+    validate_commentary,
 )
 
 SPEC_PATH = Path(__file__).parent.parent / "specs" / "spec-flexicap-page.md"
-
-BANNED_VOCABULARY = (
-    "buy",
-    "sell",
-    "avoid",
-    "attractive",
-    "will outperform",
-    "top pick",
-    "must",
-)
-
-_NUMERAL_TOKEN_RE = re.compile(r"\d*\.\d+|\d{2,}")
-
-
-def _numeral_tokens(text: str) -> list[str]:
-    """Every numeral token of 2+ digits or any decimal (§7-F4); standalone
-    single digits — the spec's "1"/"2" paragraph-safe tokens — never match.
-    """
-    return _NUMERAL_TOKEN_RE.findall(text)
-
-
-def _no_new_numbers(text: str, source_json: str) -> bool:
-    return all(tok in source_json for tok in _numeral_tokens(text))
-
-
-def _word_count(text: str) -> int:
-    return len(text.split())
-
-
-def _contains_banned_vocabulary(text: str) -> bool:
-    lowered = text.lower()
-    return any(
-        re.search(rf"\b{re.escape(term)}\b", lowered) for term in BANNED_VOCABULARY
-    )
 
 
 def _normalise(text: str) -> str:
@@ -75,76 +47,18 @@ def _normalise(text: str) -> str:
 
 def _spec_commentary_prompt() -> str:
     text = SPEC_PATH.read_text(encoding="utf-8")
-    match = re.search(r"### commentary-v2.*?```\n(.*?)```", text, re.S)
-    assert match is not None, "could not locate the commentary-v2 fenced block in the spec"
+    match = re.search(r"### commentary-v3.*?```\n(.*?)```", text, re.S)
+    assert match is not None, "could not locate the commentary-v3 fenced block in the spec"
     return match.group(1)
 
 
 def test_prompt_constant_matches_spec_verbatim() -> None:
-    assert _normalise(COMMENTARY_V2_SYSTEM_PROMPT) == _normalise(_spec_commentary_prompt())
+    assert _normalise(COMMENTARY_V3_SYSTEM_PROMPT) == _normalise(_spec_commentary_prompt())
 
 
-# ---------------------------------------------------------------------------
-# no-new-numbers check (validates the checker itself, per §7-F4)
-# ---------------------------------------------------------------------------
-
-
-def test_no_new_numbers_passes_when_every_token_is_in_the_source() -> None:
-    source = json.dumps({"return_1Y": 0.15, "ranks": {"pct": 12.5}, "year": "2023"})
-    text = "Trailing one-year return was 15% and the percentile rank stood at 12.5 as of 2023."
-    assert _no_new_numbers(text, source)
-
-
-def test_no_new_numbers_fails_on_a_fabricated_number() -> None:
-    source = json.dumps({"return_1Y": 0.15})
-    text = "The fund returned 15% and is projected to grow 42% next year."
-    assert not _no_new_numbers(text, source)
-
-
-def test_no_new_numbers_ignores_standalone_single_digit_tokens() -> None:
-    source = json.dumps({"return_1Y": 0.15})
-    text = "Paragraph 1 covers returns. Paragraph 2 covers risk. Return was 15%."
-    assert _no_new_numbers(text, source)
-
-
-# ---------------------------------------------------------------------------
-# Word count 80-170
-# ---------------------------------------------------------------------------
-
-
-def test_word_count_within_range() -> None:
-    text = " ".join(["word"] * 120)
-    assert 80 <= _word_count(text) <= 170
-
-
-def test_word_count_below_range_is_rejected() -> None:
-    text = " ".join(["word"] * 10)
-    assert not (80 <= _word_count(text) <= 170)
-
-
-def test_word_count_above_range_is_rejected() -> None:
-    text = " ".join(["word"] * 200)
-    assert not (80 <= _word_count(text) <= 170)
-
-
-# ---------------------------------------------------------------------------
-# Banned vocabulary
-# ---------------------------------------------------------------------------
-
-
-def test_banned_vocabulary_detected() -> None:
-    assert _contains_banned_vocabulary("This looks like an attractive fund to buy now.")
-    assert _contains_banned_vocabulary("Investors must consider this a top pick.")
-    assert _contains_banned_vocabulary("Analysts expect it will outperform peers.")
-
-
-def test_banned_vocabulary_absent_in_clean_text() -> None:
-    text = (
-        "The fund's three-year trailing return was 12% versus the category "
-        "benchmark's 10%. Three-year volatility stood at 18%, close to the "
-        "category median."
-    )
-    assert not _contains_banned_vocabulary(text)
+def test_banned_vocabulary_includes_v3_additions() -> None:
+    assert "yardstick" in BANNED_VOCABULARY
+    assert "year-to-date" in BANNED_VOCABULARY
 
 
 # ---------------------------------------------------------------------------
@@ -182,80 +96,185 @@ def _universe() -> dict[str, Any]:
     }
 
 
-_SAMPLE_TEXT = (
+def _source_json() -> str:
+    return json.dumps(build_user_payload(_fund(), _universe()), sort_keys=True)
+
+
+# A clean, two-paragraph, in-range sample built only from the fixture's own
+# figures — the numeral tokens are deliberately picked to be substrings of
+# ``_source_json()`` (e.g. 0.105 -> "10.5" would NOT match; percentages are
+# derived only from values whose digits already appear after the decimal
+# point in the JSON).
+_CLEAN_TEXT = (
     "The fund returned 15% over the trailing one-year period and 12% over "
-    "three years, measured against the Nifty 500 TRI category benchmark. "
-    "Calendar-year returns were 18% in 2023, moderating in 2024 and 2025, "
-    "broadly tracking the benchmark across recent years within the "
-    "cross-sectional comparison set used for this cohort of funds.\n\n"
-    "On risk, three-year volatility stood at 18% and maximum drawdown since "
-    "inception reached 22%, sitting above the category's own first quartile "
-    "of 08% and below its third quartile of 13% for the same window. "
-    "The fund's current percentile rank on the three-year window is 12.5, "
-    "placing it toward the upper part of its peer cohort on the ranking "
-    "figures available in the underlying data."
+    "three years, measured against the category benchmark. Calendar-year "
+    "returns were 18% in 2023, 9% in 2024 and 5% in 2025, tracking the "
+    "benchmark across recent years within the cross-sectional comparison "
+    "set used for this cohort of funds under review this cycle.\n\n"
+    "On risk, three-year volatility stood at 18% and maximum drawdown "
+    "since inception reached 22%, sitting above the category's own first "
+    "quartile of 08% and below its third quartile of 13% for the same "
+    "window. The fund's current percentile rank on the three-year window "
+    "is 12.5, placing it toward the upper part of its peer cohort on the "
+    "ranking figures available in the underlying data set."
 )
 
 
-def test_sample_commentary_passes_all_checks() -> None:
-    """Sanity check on the fixture text itself before it's used below."""
-    source_json = json.dumps(build_user_payload(_fund(), _universe()), sort_keys=True)
-    assert 80 <= _word_count(_SAMPLE_TEXT) <= 170
-    assert not _contains_banned_vocabulary(_SAMPLE_TEXT)
-    assert _no_new_numbers(_SAMPLE_TEXT, source_json)
+def test_clean_sample_has_no_violations() -> None:
+    """Sanity check on the fixture text before it's used below."""
+    assert validate_commentary(_CLEAN_TEXT, _source_json()) == []
 
 
 # ---------------------------------------------------------------------------
-# generate_fund_commentary: retries, success, exhaustion
+# validate_commentary: one rule at a time
 # ---------------------------------------------------------------------------
 
 
-def test_generate_fund_commentary_success() -> None:
-    def stub(system: str, user_message: str) -> str:
-        assert system == COMMENTARY_V2_SYSTEM_PROMPT
-        assert "AAAA01" in user_message
-        return _SAMPLE_TEXT
+def test_validate_commentary_word_count_too_low() -> None:
+    text = "Short paragraph one.\n\nShort paragraph two."
+    violations = validate_commentary(text, _source_json())
+    assert any("word count" in v for v in violations)
+
+
+def test_validate_commentary_word_count_too_high() -> None:
+    text = ("word " * 90).strip() + ".\n\n" + ("word " * 90).strip() + "."
+    violations = validate_commentary(text, _source_json())
+    assert any("word count" in v for v in violations)
+
+
+def test_validate_commentary_word_count_in_range_is_clean_of_that_rule() -> None:
+    words = ["word"] * 130
+    text = " ".join(words[:65]) + ".\n\n" + " ".join(words[65:]) + "."
+    violations = validate_commentary(text, _source_json())
+    assert not any("word count" in v for v in violations)
+    assert MIN_WORDS <= len(text.split()) <= MAX_WORDS
+
+
+def test_validate_commentary_wrong_paragraph_count_single() -> None:
+    text = " ".join(["word"] * 120) + "."
+    violations = validate_commentary(text, _source_json())
+    assert any("paragraph count" in v for v in violations)
+
+
+def test_validate_commentary_wrong_paragraph_count_three() -> None:
+    para = " ".join(["word"] * 40) + "."
+    text = f"{para}\n\n{para}\n\n{para}"
+    violations = validate_commentary(text, _source_json())
+    assert any("paragraph count" in v for v in violations)
+
+
+@pytest.mark.parametrize("term", list(BANNED_VOCABULARY))
+def test_validate_commentary_flags_every_banned_term(term: str) -> None:
+    para1 = " ".join(["word"] * 60) + f" {term}."
+    para2 = " ".join(["word"] * 60) + "."
+    text = f"{para1}\n\n{para2}"
+    violations = validate_commentary(text, _source_json())
+    assert any("banned vocabulary" in v and term in v for v in violations)
+
+
+def test_validate_commentary_yardstick_flagged_even_though_it_is_a_json_key() -> None:
+    # "yardstick" is a real field name in the fixture's benchmark block --
+    # confirms the check is against the *output text*, not the input JSON.
+    assert "yardstick" in _source_json()
+    text = _CLEAN_TEXT.replace("category benchmark", "category yardstick")
+    violations = validate_commentary(text, _source_json())
+    assert any("yardstick" in v for v in violations)
+
+
+def test_validate_commentary_fabricated_number_flagged() -> None:
+    text = _CLEAN_TEXT.replace("15%", "42%")
+    violations = validate_commentary(text, _source_json())
+    assert any("numbers not in input JSON" in v and "42" in v for v in violations)
+
+
+def test_validate_commentary_multiple_violations_all_reported() -> None:
+    text = "This fund is a top pick with a yardstick-beating 42% return."
+    violations = validate_commentary(text, _source_json())
+    joined = "; ".join(violations)
+    assert "word count" in joined
+    assert "paragraph count" in joined
+    assert "banned vocabulary" in joined
+    assert "numbers not in input JSON" in joined
+
+
+# ---------------------------------------------------------------------------
+# generate_fund_commentary: the one-retry, validate-before-persist path
+# ---------------------------------------------------------------------------
+
+
+def test_generate_fund_commentary_success_when_clean() -> None:
+    def stub(system: str, messages: list[dict[str, str]]) -> str:
+        assert system == COMMENTARY_V3_SYSTEM_PROMPT
+        assert len(messages) == 1
+        assert messages[0]["role"] == "user"
+        assert "AAAA01" in messages[0]["content"]
+        return _CLEAN_TEXT
 
     result = generate_fund_commentary(_fund(), _universe(), stub)
     assert isinstance(result, CommentaryResult)
-    assert result.text == _SAMPLE_TEXT
+    assert result.text == _CLEAN_TEXT
     assert result.model == MODEL == "claude-sonnet-4-6"
-    assert result.prompt_version == PROMPT_VERSION == "commentary-v2"
+    assert result.prompt_version == PROMPT_VERSION == "commentary-v3"
     datetime.fromisoformat(result.generated_at)  # does not raise
 
 
-def test_generate_fund_commentary_retries_then_succeeds() -> None:
-    calls = {"n": 0}
+def test_generate_fund_commentary_retries_after_violation_then_succeeds() -> None:
+    calls: list[list[dict[str, str]]] = []
 
-    def stub(system: str, user_message: str) -> str:
-        calls["n"] += 1
-        if calls["n"] < 2:
-            raise RuntimeError("transient failure")
-        return _SAMPLE_TEXT
+    def stub(system: str, messages: list[dict[str, str]]) -> str:
+        calls.append([dict(m) for m in messages])
+        if len(calls) == 1:
+            return "This is a top pick."  # too short, wrong paragraph count, banned term
+        return _CLEAN_TEXT
 
     result = generate_fund_commentary(_fund(), _universe(), stub)
     assert result is not None
-    assert result.text == _SAMPLE_TEXT
-    assert calls["n"] == 2
+    assert result.text == _CLEAN_TEXT
+    assert len(calls) == 2
+
+    # The retry's conversation carries the bad response and a correction
+    # turn naming the violated rules -- not just the original user message.
+    second_call = calls[1]
+    assert len(second_call) == 3
+    assert second_call[0]["role"] == "user"
+    assert second_call[1] == {"role": "assistant", "content": "This is a top pick."}
+    assert second_call[2]["role"] == "user"
+    assert "violated" in second_call[2]["content"]
+    assert "banned vocabulary" in second_call[2]["content"]
 
 
-def test_generate_fund_commentary_null_after_max_retries() -> None:
+def test_generate_fund_commentary_null_after_second_violation() -> None:
     calls = {"n": 0}
 
-    def stub(system: str, user_message: str) -> str:
+    def stub(system: str, messages: list[dict[str, str]]) -> str:
         calls["n"] += 1
-        raise RuntimeError("permanent failure")
+        return "Buy this fund now, it is a top pick!"  # violates every time
 
     result = generate_fund_commentary(_fund(), _universe(), stub)
     assert result is None
-    assert calls["n"] == MAX_RETRIES + 1
+    assert calls["n"] == MAX_RETRIES + 1 == 2
+
+
+def test_generate_fund_commentary_retries_after_transport_exception_then_succeeds() -> None:
+    calls = {"n": 0}
+
+    def stub(system: str, messages: list[dict[str, str]]) -> str:
+        calls["n"] += 1
+        if calls["n"] == 1:
+            raise RuntimeError("transient failure")
+        return _CLEAN_TEXT
+
+    result = generate_fund_commentary(_fund(), _universe(), stub)
+    assert result is not None
+    assert result.text == _CLEAN_TEXT
+    assert calls["n"] == 2
 
 
 def test_generate_fund_commentary_never_raises() -> None:
-    def always_fails(system: str, user_message: str) -> str:
+    def always_fails(system: str, messages: list[dict[str, str]]) -> str:
         raise ValueError("boom")
 
-    # Must return None, never propagate — commentary is never load-bearing.
+    # Must return None, never propagate -- commentary is never load-bearing.
     assert generate_fund_commentary(_fund(), _universe(), always_fails) is None
 
 
@@ -279,8 +298,8 @@ def test_run_persists_commentary_fields_in_place(tmp_path: Path) -> None:
     metrics_path = tmp_path / "metrics.json"
     _write_metrics(metrics_path, [_fund("AAAA01"), _fund("BBBB02")])
 
-    def stub(system: str, user_message: str) -> str:
-        return _SAMPLE_TEXT
+    def stub(system: str, messages: list[dict[str, str]]) -> str:
+        return _CLEAN_TEXT
 
     summary = run(metrics_path, transport=stub)
     assert isinstance(summary, CommentarySummary)
@@ -293,9 +312,9 @@ def test_run_persists_commentary_fields_in_place(tmp_path: Path) -> None:
     data = json.loads(metrics_path.read_text(encoding="utf-8"))
     for fund in data["funds"]:
         commentary = fund["commentary"]
-        assert commentary["text"] == _SAMPLE_TEXT
+        assert commentary["text"] == _CLEAN_TEXT
         assert commentary["model"] == MODEL
-        assert commentary["prompt_version"] == "commentary-v2"
+        assert commentary["prompt_version"] == "commentary-v3"
         datetime.fromisoformat(commentary["generated_at"])
 
 
@@ -303,7 +322,7 @@ def test_run_null_commentary_for_fund_that_exhausts_retries(tmp_path: Path) -> N
     metrics_path = tmp_path / "metrics.json"
     _write_metrics(metrics_path, [_fund("AAAA01"), _fund("BBBB02")])
 
-    def failing(system: str, user_message: str) -> str:
+    def failing(system: str, messages: list[dict[str, str]]) -> str:
         raise RuntimeError("down")
 
     summary = run(metrics_path, transport=failing)
@@ -351,11 +370,11 @@ def test_run_builds_transport_from_env_key_without_network(
 
     seen_keys: list[str] = []
 
-    def fake_anthropic_transport(api_key: str):
+    def fake_anthropic_transport(api_key: str) -> CommentaryTransport:
         seen_keys.append(api_key)
 
-        def _stub(system: str, user_message: str) -> str:
-            return _SAMPLE_TEXT
+        def _stub(system: str, messages: list[dict[str, str]]) -> str:
+            return _CLEAN_TEXT
 
         return _stub
 

@@ -70,7 +70,7 @@ recomputed here — the runner calls existing functions only.
     "rolling": {panel_name: [{"date": d, "value": v}]},
     "ranks": {metric_window: {"pct": v, "history": [{"date": d, "pct": v}]}},
     // pct (latest + history): lower = better; 1 ≈ top of cohort
-    "commentary": {"text": str, "model": str, "prompt_version": "commentary-v2",
+    "commentary": {"text": str, "model": str, "prompt_version": "commentary-v3",
                     "generated_at": ts} | null
   }]
 }
@@ -102,16 +102,28 @@ re-rounding outside the presentation layer.
 
 - One Anthropic API call per fund at build time, model **claude-sonnet-4-6**
   (relational fidelity across ~30 figures per fund is the binding constraint;
-  cost is immaterial at this scale), system prompt = `commentary-v2`
+  cost is immaterial at this scale), system prompt = `commentary-v3`
   (verbatim below), user message = the fund's entry from metrics.json
   (metrics, calendar_years, ranks, universe aggregates). Persisted into
   metrics.json with model + prompt_version.
 - Runs **locally only** this milestone; `ANTHROPIC_API_KEY` from env/`.env`
   (gitignored). Key never in either repo or artifacts. Build proceeds with
-  `commentary: null` (block hidden) if key absent or a call fails after 2
-  retries — commentary is never load-bearing.
+  `commentary: null` (block hidden) if key absent, a call fails after one
+  retry, or the response still violates the descriptive-only contract after
+  one retry — commentary is never load-bearing.
+- **Runtime contract enforcement** (added at v3; the remaining violations
+  after v2 were the model's, not the pipeline's — "enforced by tests, not
+  trust" moved to a runtime gate): every real response is checked before
+  being persisted — word count 100-170, exactly two paragraphs, the banned-
+  vocabulary list absent, and the no-new-numbers rule (every numeral token
+  of 2+ digits or any decimal must substring-match the input JSON). On a
+  violation, one retry is sent with the invalid response plus a correction
+  message naming the violated rules; a second failure of either kind
+  (transport error or violation) leaves `commentary: null`, logged with the
+  named violations. The check is one pure function, used identically by the
+  runtime path and the F4 test suite, so it can never drift between them.
 
-### commentary-v2 (system prompt, verbatim — hash this text as the version)
+### commentary-v3 (system prompt, verbatim — hash this text as the version)
 
 ```
 You are writing a short factual commentary for a mutual fund
@@ -126,6 +138,11 @@ Rules — absolute:
   calendar year is never "year-to-date". The category median and
   the benchmark are different comparators — never merge them in
   one phrase.
+- Call the category comparator "the category benchmark" (naming the
+  index). The word "yardstick" must never appear, even if it
+  appears in field names in the JSON.
+- Never write "year-to-date" or "YTD". Calendar-year figures are
+  full-year figures and are described by their year alone.
 - Percentile ranks: lower is better; 1 is approximately the top of
   the cohort, 100 the bottom. Never describe a low percentile as
   underperformance. Round percentiles to whole numbers in prose.
@@ -184,11 +201,16 @@ Output: plain text, two paragraphs, nothing else.
   text; footnote + disclaimer strings present on every page.
 - **F3 PDF**: Tests: PDF exists per fund; page count ≥1; disclaimer string
   present in extracted text.
-- **F4 Commentary**: Tests: **no-new-numbers** — every numeral token in output
-  substring-matches the input JSON (integers ≥2 digits and all decimals;
-  ignore standalone "1"/"2" paragraph-safe tokens); word count 80–170; banned
-  vocabulary list (buy, sell, avoid, attractive, will outperform, …) absent;
-  offline test uses a recorded stub — the suite never calls the API.
+- **F4 Commentary**: `validate_commentary(text, input_json) -> list[str]` (§5)
+  is the single check, shared by the runtime retry path and the test suite:
+  **no-new-numbers** — every numeral token in output substring-matches the
+  input JSON (integers ≥2 digits and all decimals; ignore standalone
+  "1"/"2" paragraph-safe tokens); word count 100–170; exactly two
+  paragraphs; banned vocabulary list (buy, sell, avoid, attractive, will
+  outperform, top pick, must, yardstick, year-to-date) absent. Tests cover
+  the validator directly plus the retry path (a stub that violates once
+  then passes) and the null path (a stub that violates twice); offline
+  only — the suite never calls the API.
 - **F5 Publish**: manual checklist, not automated: Pages URL loads, Bandhan
   page + PDF spot-checked against factsheet, no raw-data files in site repo.
 

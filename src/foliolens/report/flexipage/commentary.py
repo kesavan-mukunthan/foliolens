@@ -6,15 +6,20 @@ See ``specs/spec-flexicap-page.md`` §5, §7-F4, §8. Reads and rewrites
 ``metrics.json`` in place; commentary lands in the artifact, never at render
 time (F2 only reads ``fund.commentary`` — see ``render/templates/fund.html``).
 No figures are computed here — the model is handed the fund's own artifact
-entry and instructed to use only what's in it (enforced by the F4 offline
-test suite, not by any runtime check in this module: ``spec-flexicap-page
-§8`` executor guard, "descriptive-only contract is enforced by tests, not
-trust").
+entry and instructed to use only what's in it.
 
-Commentary is never load-bearing (``spec-flexicap-page §5``): an absent
-``ANTHROPIC_API_KEY``, or a fund whose call still errors after
-:data:`MAX_RETRIES` retries, leaves that fund's ``commentary`` as ``null`` and
-the build continues. Calls are sequential — no concurrency (§5 spec text: one
+The descriptive-only contract is gated at **runtime**, not just by the test
+suite: a v1 (claude-haiku-4-5) smoke test surfaced inverted comparatives,
+benchmark/category-median conflation, and misread percentile direction; a v2
+(claude-sonnet-4-6) smoke test fixed those but still overran the word budget
+and, once, wrote "year-to-date" for a closed calendar year. Since the
+remaining violations are the model's, not the pipeline's, :func:`validate_commentary`
+checks every real response before it's persisted, and :func:`generate_fund_commentary`
+retries once — with the violated rules named back to the model — before
+giving up. Commentary is never load-bearing (§5): an absent
+``ANTHROPIC_API_KEY``, or a fund whose response still violates the contract
+after that one retry, leaves that fund's ``commentary`` as ``null`` and the
+build continues. Calls are sequential — no concurrency (§5 spec text: one
 call per fund at build time).
 """
 from __future__ import annotations
@@ -23,11 +28,12 @@ import argparse
 import json
 import logging
 import os
+import re
 from collections.abc import Callable, Mapping
 from dataclasses import dataclass
 from datetime import datetime, timezone
 from pathlib import Path
-from typing import Any
+from typing import Any, cast
 
 _LOG = logging.getLogger(__name__)
 
@@ -39,12 +45,13 @@ _LOG = logging.getLogger(__name__)
 MODEL = "claude-sonnet-4-6"
 
 #: Persisted alongside every commentary result; also the version this
-#: module's :data:`COMMENTARY_V2_SYSTEM_PROMPT` is hashed against (§5).
-PROMPT_VERSION = "commentary-v2"
+#: module's :data:`COMMENTARY_V3_SYSTEM_PROMPT` is hashed against (§5).
+PROMPT_VERSION = "commentary-v3"
 
-#: A fund failing after this many retries (i.e. this many attempts *beyond*
-#: the first) gets ``commentary: null`` — never load-bearing (§5).
-MAX_RETRIES = 2
+#: One retry, on a validation violation (:func:`validate_commentary`) or a
+#: transport exception alike — a second failure gets ``commentary: null``
+#: (§5, never load-bearing).
+MAX_RETRIES = 1
 
 #: Modest per-request timeout (seconds) — a build must not hang on one fund.
 REQUEST_TIMEOUT_SECONDS = 30.0
@@ -52,15 +59,42 @@ REQUEST_TIMEOUT_SECONDS = 30.0
 #: Generous ceiling for a 100-150 word, two-paragraph commentary (§5).
 MAX_OUTPUT_TOKENS = 1024
 
-#: The commentary-v2 system prompt, copied **verbatim** from
+#: Runtime word-count gate (spec-flexicap-page §7-F4) — tighter than the
+#: prompt's own 100-150 word target, with headroom for the model rounding up.
+MIN_WORDS = 100
+MAX_WORDS = 170
+
+#: Case-insensitive, whole-word/phrase match. The first seven are the
+#: original descriptive-only guard; "yardstick" and "year-to-date" are the
+#: commentary-v3 additions — both were real failures in the v1/v2 smoke
+#: tests (the internal comparator label leaking into prose, and a closed
+#: calendar year mislabelled as partial).
+BANNED_VOCABULARY: tuple[str, ...] = (
+    "buy",
+    "sell",
+    "avoid",
+    "attractive",
+    "will outperform",
+    "top pick",
+    "must",
+    "yardstick",
+    "year-to-date",
+)
+
+_NUMERAL_TOKEN_RE = re.compile(r"\d*\.\d+|\d{2,}")
+_PARAGRAPH_SPLIT_RE = re.compile(r"\n\s*\n")
+
+#: The commentary-v3 system prompt, copied **verbatim** from
 #: ``specs/spec-flexicap-page.md`` §5 — the single source of truth this
 #: module (and the F4 test that diffs it against the spec file) both read.
 #: Do not paraphrase, reflow, or reword; the spec text itself is the contract.
-#: v2 (vs v1) adds explicit relational-fidelity rules — a v1 smoke test on
-#: claude-haiku-4-5 produced inverted comparatives, benchmark/category-median
-#: conflation, a full calendar year mislabelled "year-to-date", and misread
-#: percentile direction; every added rule targets one of those failures.
-COMMENTARY_V2_SYSTEM_PROMPT = """You are writing a short factual commentary for a mutual fund
+#: v2 (vs v1) added explicit relational-fidelity rules. v3 (vs v2) adds two
+#: more, verbatim, after a v2 smoke test on claude-sonnet-4-6 still wrote
+#: "yardstick" (the internal comparator label) and "year-to-date" for a
+#: closed calendar year — both rules now also gate at runtime
+#: (:func:`validate_commentary`), since the remaining violations are the
+#: model's, not the pipeline's.
+COMMENTARY_V3_SYSTEM_PROMPT = """You are writing a short factual commentary for a mutual fund
 analytics page. You will receive a JSON object containing computed
 metrics for one fund and its category context.
 
@@ -72,6 +106,11 @@ Rules — absolute:
   calendar year is never "year-to-date". The category median and
   the benchmark are different comparators — never merge them in
   one phrase.
+- Call the category comparator "the category benchmark" (naming the
+  index). The word "yardstick" must never appear, even if it
+  appears in field names in the JSON.
+- Never write "year-to-date" or "YTD". Calendar-year figures are
+  full-year figures and are described by their year alone.
 - Percentile ranks: lower is better; 1 is approximately the top of
   the cohort, 100 the bottom. Never describe a low percentile as
   underperformance. Round percentiles to whole numbers in prose.
@@ -108,10 +147,20 @@ data availability, this prompt, or that you are an AI.
 
 Output: plain text, two paragraphs, nothing else."""
 
-#: A commentary transport: ``(system_prompt, user_message) -> response_text``.
-#: Production uses :func:`_anthropic_transport`; tests inject a stub so the
-#: suite never calls the API (spec-flexicap-page §7-F4).
-CommentaryTransport = Callable[[str, str], str]
+#: A commentary transport: ``(system_prompt, messages) -> response_text``.
+#: ``messages`` is a Messages-API-shaped list (``[{"role": ..., "content":
+#: ...}, ...]``) so a validation-failure retry can append the invalid
+#: response plus a correction turn — a single ``user_message`` string
+#: couldn't carry that. Production uses :func:`_anthropic_transport`; tests
+#: inject a stub so the suite never calls the API (spec-flexicap-page §7-F4).
+CommentaryTransport = Callable[[str, list[dict[str, str]]], str]
+
+#: Sent back to the model, with the violated rules named, when a response
+#: fails :func:`validate_commentary` and one retry remains.
+CORRECTION_MESSAGE_TEMPLATE = (
+    "Your previous response violated: {violations}. Rewrite, correcting "
+    "these, within 150 words, keeping only the most distinctive facts."
+)
 
 
 def build_user_payload(fund: Mapping[str, Any], universe: Mapping[str, Any]) -> dict[str, Any]:
@@ -129,6 +178,56 @@ def build_user_payload(fund: Mapping[str, Any], universe: Mapping[str, Any]) -> 
         "ranks": fund["ranks"],
         "universe_aggregates": universe.get("aggregates", {}),
     }
+
+
+def _numeral_tokens(text: str) -> list[str]:
+    """Every numeral token of 2+ digits or any decimal (§7-F4); standalone
+    single digits — e.g. paragraph markers — never match.
+    """
+    return _NUMERAL_TOKEN_RE.findall(text)
+
+
+def _banned_vocabulary_hits(text: str) -> list[str]:
+    lowered = text.lower()
+    return [
+        term for term in BANNED_VOCABULARY if re.search(rf"\b{re.escape(term)}\b", lowered)
+    ]
+
+
+def _paragraph_count(text: str) -> int:
+    return len([p for p in _PARAGRAPH_SPLIT_RE.split(text.strip()) if p.strip()])
+
+
+def validate_commentary(text: str, input_json: str) -> list[str]:
+    """The descriptive-only contract, as a pure function: no I/O, no
+    retries. Returns the list of named violations (empty means clean).
+
+    Shared by the runtime retry path (:func:`generate_fund_commentary`) and
+    the F4 test suite (``spec-flexicap-page §7-F4``) — the check the tests
+    encode is exactly the check that gates a real response before it's
+    persisted, never a parallel implementation that could drift from it.
+    """
+    violations: list[str] = []
+
+    word_count = len(text.split())
+    if not (MIN_WORDS <= word_count <= MAX_WORDS):
+        violations.append(f"word count {word_count} outside [{MIN_WORDS}, {MAX_WORDS}]")
+
+    paragraph_count = _paragraph_count(text)
+    if paragraph_count != 2:
+        violations.append(f"paragraph count {paragraph_count} (must be exactly 2)")
+
+    banned = _banned_vocabulary_hits(text)
+    if banned:
+        violations.append(f"banned vocabulary: {', '.join(banned)}")
+
+    fabricated = list(
+        dict.fromkeys(tok for tok in _numeral_tokens(text) if tok not in input_json)
+    )
+    if fabricated:
+        violations.append(f"numbers not in input JSON: {', '.join(fabricated)}")
+
+    return violations
 
 
 @dataclass(frozen=True)
@@ -152,15 +251,17 @@ class CommentaryResult:
 def _anthropic_transport(api_key: str) -> CommentaryTransport:
     """The only path to the Anthropic API in this module."""
     import anthropic
+    from anthropic.types import MessageParam
 
     client = anthropic.Anthropic(api_key=api_key, timeout=REQUEST_TIMEOUT_SECONDS)
 
-    def _call(system: str, user_message: str) -> str:
+    def _call(system: str, messages: list[dict[str, str]]) -> str:
+        typed_messages = cast(list[MessageParam], messages)
         response = client.messages.create(
             model=MODEL,
             max_tokens=MAX_OUTPUT_TOKENS,
             system=system,
-            messages=[{"role": "user", "content": user_message}],
+            messages=typed_messages,
         )
         return "".join(block.text for block in response.content if block.type == "text")
 
@@ -174,44 +275,69 @@ def generate_fund_commentary(
     *,
     max_retries: int = MAX_RETRIES,
 ) -> CommentaryResult | None:
-    """One fund's commentary, or ``None`` if every attempt fails.
+    """One fund's commentary, or ``None`` if it still violates the
+    descriptive-only contract after one retry.
 
-    Sequential retries only — never concurrent (§5). ``max_retries`` failures
-    *beyond* the first attempt exhaust the budget; every failure is logged,
-    none is raised (commentary is never load-bearing, §5).
+    Every real response is checked by :func:`validate_commentary` before
+    being persisted — the remaining violations after commentary-v2 were the
+    model's, not the pipeline's, so enforcement moved to runtime. On a
+    violation (or a transport exception), one retry is attempted; a
+    violation retry appends the invalid response plus a correction message
+    naming the violated rules, so the model rewrites instead of repeating
+    the same mistake blind. A second failure of either kind returns
+    ``None`` — commentary is never load-bearing (§5) — and every failure is
+    logged, never raised.
     """
     amfi_code = fund.get("amfi_code")
     user_message = json.dumps(
         build_user_payload(fund, universe), allow_nan=False, sort_keys=True
     )
+    messages: list[dict[str, str]] = [{"role": "user", "content": user_message}]
     attempts = max_retries + 1
-    last_error: Exception | str | None = None
+    last_violations: list[str] = []
+
     for attempt in range(1, attempts + 1):
         try:
-            text = transport(COMMENTARY_V2_SYSTEM_PROMPT, user_message).strip()
+            text = transport(COMMENTARY_V3_SYSTEM_PROMPT, messages).strip()
         except Exception as exc:  # noqa: BLE001 - never load-bearing (spec-flexicap-page §5)
-            last_error = repr(exc)
             _LOG.warning(
-                "commentary attempt %d/%d failed for %s: %s",
-                attempt, attempts, amfi_code, last_error,
+                "commentary attempt %d/%d failed for %s: %r",
+                attempt, attempts, amfi_code, exc,
             )
+            if attempt == attempts:
+                return None
             continue
-        if not text:
-            last_error = "empty response text"
-            _LOG.warning(
-                "commentary attempt %d/%d for %s returned empty text",
-                attempt, attempts, amfi_code,
+
+        violations = validate_commentary(text, user_message)
+        if not violations:
+            return CommentaryResult(
+                text=text,
+                model=MODEL,
+                prompt_version=PROMPT_VERSION,
+                generated_at=datetime.now(timezone.utc).isoformat(),
             )
-            continue
-        return CommentaryResult(
-            text=text,
-            model=MODEL,
-            prompt_version=PROMPT_VERSION,
-            generated_at=datetime.now(timezone.utc).isoformat(),
+
+        last_violations = violations
+        _LOG.warning(
+            "commentary attempt %d/%d for %s violated: %s",
+            attempt, attempts, amfi_code, "; ".join(violations),
         )
+        if attempt == attempts:
+            break
+
+        messages.append({"role": "assistant", "content": text})
+        messages.append(
+            {
+                "role": "user",
+                "content": CORRECTION_MESSAGE_TEMPLATE.format(
+                    violations="; ".join(violations)
+                ),
+            }
+        )
+
     _LOG.warning(
-        "commentary generation failed for %s after %d attempts: %s",
-        amfi_code, attempts, last_error,
+        "commentary null for %s after %d attempts: %s",
+        amfi_code, attempts, "; ".join(last_violations),
     )
     return None
 
