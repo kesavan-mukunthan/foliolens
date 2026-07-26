@@ -15,6 +15,7 @@ from __future__ import annotations
 
 import csv
 import json
+import re
 from datetime import date, timedelta
 from decimal import Decimal
 from html.parser import HTMLParser
@@ -297,3 +298,126 @@ def test_young_fund_charts_skip_cleanly(site: RenderSummary) -> None:
     html = (site.out_dir / "funds" / "CCCC03.html").read_text(encoding="utf-8")
     assert "<svg" not in html
     assert "No charts available" in html
+
+
+# ---------------------------------------------------------------------------
+# Amendment 5: "yardstick" is an internal identifier only, never rendered.
+# ---------------------------------------------------------------------------
+
+
+def test_no_yardstick_word_in_rendered_text(site: RenderSummary) -> None:
+    for page in _all_pages(site):
+        text = _rendered_text(page.read_text(encoding="utf-8"))
+        assert "yardstick" not in text.lower()
+
+
+# ---------------------------------------------------------------------------
+# Amendment 2: index table's default order — ascending display rank
+# (amendment 1's lower-is-better convention), nulls last.
+# ---------------------------------------------------------------------------
+
+
+def test_index_default_sort_ascending_by_rank_nulls_last(site: RenderSummary) -> None:
+    html = (site.out_dir / "index.html").read_text(encoding="utf-8")
+    rows = re.findall(r"<tr>(.*?)</tr>", html, re.S)
+    rank_values = []
+    for r in rows:
+        if "funds/" not in r:
+            continue
+        cells = re.findall(r'<td[^>]*data-value="([^"]*)"', r)
+        rank_values.append(cells[-1])
+
+    present = [float(v) for v in rank_values if v != ""]
+    assert present, "fixture must carry at least one ranked fund"
+    assert present == sorted(present)
+    assert present[0] == min(present)
+    # nulls (the young fund, no 3Y history) trail every non-null row
+    assert all(v == "" for v in rank_values[len(present) :])
+
+
+# ---------------------------------------------------------------------------
+# Amendment 4: excess-return colouring — right cells, nowhere else.
+# ---------------------------------------------------------------------------
+
+
+def _minimal_fund(amfi_code: str, excess_1y: float, excess_3y: float, excess_5y: float) -> dict:
+    return {
+        "amfi_code": amfi_code,
+        "scheme_name": f"{amfi_code} Fund - Direct Plan - Growth",
+        "fund_house": "Test Fund House",
+        "benchmark": {"stated": None, "tier": None, "yardstick": "NIFTY500TRI"},
+        "metrics": {
+            "return_1Y": 0.15,
+            "return_3Y": 0.12,
+            "return_5Y": 0.10,
+            "excess_return_1Y": excess_1y,
+            "excess_return_3Y": excess_3y,
+            "excess_return_5Y": excess_5y,
+            "volatility_3Y": 0.18,
+            "sharpe_3Y": 1.2,
+            "max_drawdown_SI": -0.2,
+        },
+        "calendar_years": {},
+        "alpha": {},
+        "rolling": {},
+        "ranks": {},
+        "commentary": None,
+    }
+
+
+def test_excess_return_coloring_on_right_cells_only(tmp_path: Path) -> None:
+    artifact = {
+        "schema_version": "flexipage-1",
+        "as_of": "2026-07-14",
+        "universe": {
+            "category": "flexi_cap",
+            "count": 2,
+            "yardstick": "NIFTY500TRI",
+            "aggregates": {},
+        },
+        "funds": [
+            _minimal_fund("POS001", 0.02, 0.01, 0.03),
+            _minimal_fund("NEG001", -0.02, -0.01, -0.03),
+        ],
+    }
+    metrics_path = tmp_path / "metrics.json"
+    metrics_path.write_text(json.dumps(artifact))
+    summary = render_site(metrics_path, tmp_path / "site")
+
+    pos_html = (summary.out_dir / "funds" / "POS001.html").read_text(encoding="utf-8")
+    neg_html = (summary.out_dir / "funds" / "NEG001.html").read_text(encoding="utf-8")
+
+    pos_excess_row = re.search(r"<td>Excess Return.*?</tr>", pos_html, re.S)
+    assert pos_excess_row is not None
+    assert pos_excess_row.group(0).count("excess-pos") == 3
+    assert "excess-neg" not in pos_excess_row.group(0)
+
+    neg_excess_row = re.search(r"<td>Excess Return.*?</tr>", neg_html, re.S)
+    assert neg_excess_row is not None
+    assert neg_excess_row.group(0).count("excess-neg") == 3
+    assert "excess-pos" not in neg_excess_row.group(0)
+
+    # No cell outside the excess-return row carries an excess-* class on
+    # either fund page — colour only ever applied to excess-return columns.
+    # (Count the class *attribute* only — the layout stylesheet's own
+    # ``.excess-pos``/``.excess-neg`` rule definitions would otherwise
+    # double-count as a false positive.)
+    for html in (pos_html, neg_html):
+        assert (
+            html.count('class="excess-pos"') + html.count('class="excess-neg"') == 3
+        )
+
+    index_html = (summary.out_dir / "index.html").read_text(encoding="utf-8")
+    pos_row = re.search(
+        r'<tr>\s*<td[^>]*><a href="funds/POS001\.html".*?</tr>', index_html, re.S
+    )
+    assert pos_row is not None
+    assert pos_row.group(0).count("excess-pos") == 3
+    assert "excess-neg" not in pos_row.group(0)
+
+    neg_row = re.search(
+        r'<tr>\s*<td[^>]*><a href="funds/NEG001\.html".*?</tr>', index_html, re.S
+    )
+    assert neg_row is not None
+    assert neg_row.group(0).count("excess-neg") == 3
+    assert "excess-pos" not in neg_row.group(0)

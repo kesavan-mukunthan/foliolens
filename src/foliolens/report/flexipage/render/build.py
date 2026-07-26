@@ -55,6 +55,7 @@ def _make_env() -> Environment:
     env.filters["pct100"] = _pct100
     env.filters["num"] = _num
     env.filters["dataval"] = _dataval
+    env.filters["excess_class"] = presentation.excess_class
     return env
 
 
@@ -95,6 +96,9 @@ def render_site(metrics_path: Path, out_dir: Path) -> RenderSummary:
         root_prefix="",
         current_amfi_code=None,
         universe=data["universe"],
+        category_benchmark_label=presentation.category_benchmark_label(
+            data["universe"]["yardstick"]
+        ),
         aggregate_rows=presentation.build_aggregate_rows(data["universe"]["aggregates"]),
         index_rows=presentation.build_index_rows(funds),
     )
@@ -115,6 +119,9 @@ def render_site(metrics_path: Path, out_dir: Path) -> RenderSummary:
             root_prefix="../",
             current_amfi_code=fund["amfi_code"],
             fund=fund,
+            category_benchmark_display=presentation.benchmark_display_name(
+                fund["benchmark"]["yardstick"]
+            ),
             windows=presentation.WINDOWS,
             calendar_years=calendar_years,
             metrics_rows=presentation.build_metrics_rows(fund["metrics"]),

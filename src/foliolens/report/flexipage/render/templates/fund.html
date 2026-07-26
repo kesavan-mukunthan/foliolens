@@ -5,7 +5,7 @@
 <p class="fund-house">{{ fund.fund_house }} &middot; {{ fund.amfi_code }}</p>
 
 <section class="benchmark-block">
-  <p>Ranked vs category benchmark ({{ fund.benchmark.yardstick }}).</p>
+  <p>Category benchmark: {{ category_benchmark_display }}</p>
   {% if fund.benchmark.tier == "alternate-pending-tier1" %}
   <p><span class="tier-fallback">{{ tier_fallback_label }}</span>
     &mdash; stated benchmark {{ fund.benchmark.stated }} has not landed yet.</p>
@@ -22,7 +22,7 @@
     <tr>
       <td>{{ row.label }}</td>
       {% for w in windows %}
-      <td>{{ row.values[w]|pct if row.is_pct else row.values[w]|num }}</td>
+      <td class="{{ row.values[w]|excess_class if row.is_excess else '' }}">{{ row.values[w]|pct if row.is_pct else row.values[w]|num }}</td>
       {% endfor %}
     </tr>
     {% endfor %}

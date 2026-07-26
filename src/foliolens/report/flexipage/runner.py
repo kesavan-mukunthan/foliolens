@@ -33,6 +33,7 @@ from foliolens.data_access import DATA_DIR_ENV_VAR, DataAccess, default_data_dir
 from foliolens.ingest.iima import rf_investment
 from foliolens.model.investments import Benchmark, ShareClass, benchmark_from_index
 from foliolens.model.sources import PricedSource
+from foliolens.model.value_objects import NavSeries
 
 from .assembly import FundPanel, assemble_universe, build_fund_panel
 
@@ -43,6 +44,72 @@ CATEGORY = "flexi_cap"
 #: Abort the build if more than this fraction of the cohort fails to load
 #: (``spec-flexicap-page §7`` F1 acceptance).
 MAX_FAILURE_RATE = 0.10
+
+#: Interior-anomaly guard thresholds (``spec-flexicap-page §7`` F1 addition):
+#: a corrupted splice in a manually-combined source file produced a phantom
+#: +33% day at a chunk boundary once already — endpoint and continuity checks
+#: cannot catch an interior basis break, so every loaded index series is
+#: walked point-to-point before it feeds any computation.
+DAY_OVER_DAY_MAX_ABS_CHANGE = 0.15
+MONTH_OVER_MONTH_MAX_ABS_CHANGE = 0.25
+
+#: Checks apply only on/after this date. Real Indian-market single-session
+#: moves reached roughly ±18% around the 2004 election-result crash and the
+#: 2008-09 GFC — both before this cutoff — and the market has not moved that
+#: far in one session since, so ±15% cleanly separates a corrupted splice
+#: from genuine historical volatility without false-positiving on those two
+#: real extremes.
+ANOMALY_CHECK_START_DATE = date(2010, 1, 1)
+
+
+class IndexAnomalyError(RuntimeError):
+    """A landed index series has an interior level break past the guard's cutoff.
+
+    Deliberately **not** a ``ValueError`` subclass: ``_index_landed``'s
+    ``except ValueError`` is its "not landed" probe and must never swallow a
+    real data-quality abort — this always propagates out of ``run()``.
+    """
+
+
+def _validate_index_series(index_code: str, series: NavSeries) -> None:
+    """Fail loud on an interior day-over-day or month-over-month level break.
+
+    Walks the series once point-to-point (never resampled/smoothed away), so
+    a single corrupted row at any interior position is caught even though
+    both its neighbours look individually plausible.
+    """
+    data = series.data
+    for (prev_date, prev_level), (curr_date, curr_level) in zip(data, data[1:]):
+        if curr_date < ANOMALY_CHECK_START_DATE or prev_level == 0:
+            continue
+        change = float(curr_level / prev_level - 1)
+        if abs(change) > DAY_OVER_DAY_MAX_ABS_CHANGE:
+            raise IndexAnomalyError(
+                f"{index_code}: day-over-day change of {change:+.1%} on "
+                f"{curr_date.isoformat()} ({prev_level} on {prev_date.isoformat()} -> "
+                f"{curr_level}) exceeds the ±{DAY_OVER_DAY_MAX_ABS_CHANGE:.0%} guard"
+            )
+
+    month_ends = series.month_end().data
+    for (prev_date, prev_level), (curr_date, curr_level) in zip(
+        month_ends, month_ends[1:]
+    ):
+        if curr_date < ANOMALY_CHECK_START_DATE or prev_level == 0:
+            continue
+        change = float(curr_level / prev_level - 1)
+        if abs(change) > MONTH_OVER_MONTH_MAX_ABS_CHANGE:
+            raise IndexAnomalyError(
+                f"{index_code}: month-over-month change of {change:+.1%} at "
+                f"{curr_date.isoformat()} ({prev_level} on {prev_date.isoformat()} -> "
+                f"{curr_level}) exceeds the ±{MONTH_OVER_MONTH_MAX_ABS_CHANGE:.0%} guard"
+            )
+
+
+def _load_index_series_checked(data_access: DataAccess, index_code: str) -> NavSeries:
+    """The only path to index level data in this module — validated on load."""
+    series = data_access.load_index_series(index_code)
+    _validate_index_series(index_code, series)
+    return series
 
 
 @dataclass(frozen=True)
@@ -111,16 +178,19 @@ def _build_fund_investment(data_access: DataAccess, amfi_code: str) -> ShareClas
 def _index_landed(data_access: DataAccess, index_code: str) -> bool:
     """Whether ``index_code`` has any landed level data (``spec-flexicap-page §1``
     tier-fallback check — BSE500TRI has not landed as of this milestone).
+
+    Only catches "no data" (``ValueError``); an ``IndexAnomalyError`` from the
+    interior-break guard is never a "not landed" signal and always propagates.
     """
     try:
-        data_access.load_index_series(index_code)
+        _load_index_series_checked(data_access, index_code)
     except ValueError:
         return False
     return True
 
 
 def _build_benchmark(data_access: DataAccess, index_code: str) -> Benchmark:
-    return benchmark_from_index(data_access.load_index_series(index_code))
+    return benchmark_from_index(_load_index_series_checked(data_access, index_code))
 
 
 def run(

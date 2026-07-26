@@ -16,6 +16,8 @@ from typing import Any
 
 import matplotlib
 
+from .presentation import benchmark_display_name
+
 matplotlib.use("Agg")
 import matplotlib.pyplot as plt  # noqa: E402 - backend must be set first
 
@@ -55,7 +57,13 @@ def growth_of_10k_chart(fund: dict[str, Any]) -> str | None:
     fd, fv = _dates_values(fund_series)
     yd, yv = _dates_values(yardstick_series)
     ax.plot(fd, fv, label=fund["scheme_name"], color="steelblue")  # type: ignore[arg-type]
-    ax.plot(yd, yv, label=fund["benchmark"]["yardstick"], color="grey", linestyle="--")  # type: ignore[arg-type]
+    ax.plot(
+        yd,  # type: ignore[arg-type]
+        yv,
+        label=benchmark_display_name(fund["benchmark"]["yardstick"]),
+        color="grey",
+        linestyle="--",
+    )
     ax.set_title("Growth of ₹10,000")
     ax.set_ylabel("₹")
     ax.legend(fontsize=8)
@@ -89,7 +97,7 @@ def rolling_excess_return_chart(fund: dict[str, Any]) -> str | None:
     pct = [x * 100 for x in v]
     ax.axhline(0, color="black", linewidth=0.8)
     ax.plot(d, pct, color="steelblue")  # type: ignore[arg-type]
-    ax.set_title("Rolling 3Y Excess Return vs Yardstick")
+    ax.set_title("Rolling 3Y Excess Return vs Category Benchmark")
     ax.set_ylabel("%")
     ax.grid(True, alpha=0.3)
     fig.autofmt_xdate()
@@ -105,9 +113,12 @@ def rolling_sharpe_rank_band_chart(fund: dict[str, Any]) -> str | None:
     pct = [float(p["pct"]) for p in history]
     ax.axhspan(25, 75, color="steelblue", alpha=0.15, label="Category IQR (25th-75th pct)")
     ax.plot(d, pct, color="steelblue", marker="o", markersize=2)  # type: ignore[arg-type]
-    ax.set_ylim(0, 100)
+    # Display convention is lower-is-better (spec-flexicap-page §2/§3,
+    # amendment 1): inverting the axis puts the best rank (1 ≈ top of cohort)
+    # visually at the top of the chart, matching "up = better" everywhere else.
+    ax.set_ylim(100, 0)
     ax.set_title("Rolling 3Y Sharpe — Percentile Rank")
-    ax.set_ylabel("Percentile")
+    ax.set_ylabel("Percentile rank (lower = better)")
     ax.legend(fontsize=8, loc="upper right")
     ax.grid(True, alpha=0.3)
     fig.autofmt_xdate()

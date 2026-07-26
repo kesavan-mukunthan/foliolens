@@ -47,7 +47,10 @@ recomputed here — the runner calls existing functions only.
 - Rolling panel, monthly step: rolling 1Y and 3Y {return, volatility, Sharpe,
   excess return}
 - Cross-sectional: percentile rank within universe per metric-window (latest)
-  + rank history derived from the rolling panel
+  + rank history derived from the rolling panel. Percentile ranks: **lower =
+  better; 1 ≈ top of cohort** (flipped from `analytics/peer.py`'s own
+  higher-is-better convention at the point the artifact is assembled, never
+  inside `peer.py` itself).
 - Category aggregates: median and quartiles per metric-window
 
 ## 3. metrics.json (durable artifact; the seam for any future frontend)
@@ -66,6 +69,7 @@ recomputed here — the runner calls existing functions only.
     "calendar_years": {"2023": v, "2024": v, "2025": v},
     "rolling": {panel_name: [{"date": d, "value": v}]},
     "ranks": {metric_window: {"pct": v, "history": [{"date": d, "pct": v}]}},
+    // pct (latest + history): lower = better; 1 ≈ top of cohort
     "commentary": {"text": str, "model": str, "prompt_version": "commentary-v1",
                     "generated_at": ts} | null
   }]
