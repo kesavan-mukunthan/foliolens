@@ -89,7 +89,9 @@ def test_metrics_carry_computed_values() -> None:
     assert mr.metrics["sharpe_SI"] == sharpe(rs, rf.returns)
     assert mr.metrics["skew_SI"] == skew(rs)
     # Windowed metric == the pure function on the trailing slice.
-    last12 = ReturnSeries(dates=rs.dates[-12:], values=rs.values[-12:], base=rs.base)
+    last12 = ReturnSeries(
+        dates=rs.dates[-12:], values=rs.values[-12:], frequency=rs.frequency, base=rs.base
+    )
     assert mr.metrics["volatility_1Y"] == volatility(last12)
 
 

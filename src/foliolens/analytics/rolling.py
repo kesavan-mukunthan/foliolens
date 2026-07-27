@@ -1,7 +1,8 @@
 """§4 rolling returns — monthly step, 1/3/5y windows, over ``ReturnSeries``.
 
-Pure and periodicity-agnostic over the monthly analytical series, mirroring
-§2/§3. Each window's compounded return is produced by :func:`period_return_abs`
+Pure over the monthly analytical series (fixed per ``spec-analytics``: asserts
+``Frequency.MONTHLY`` at entry), mirroring §2/§3. Each window's compounded
+return is produced by :func:`period_return_abs`
 (§2) over a ``between`` slice — the compounding logic (``Π(1+r) − 1``) is never
 reimplemented here, only annualised on top per the SEBI ≥1y rule (``CLAUDE.md``
 → *Analytics conventions*: ``(1+R)^(12/n) − 1``).
@@ -18,7 +19,9 @@ import numpy as np
 
 from foliolens.model.value_objects import ReturnSeries
 
+from ..returns.frequency import Frequency
 from .metrics import period_return_abs
+from .series_ops import require_frequency
 
 _MONTHS_PER_YEAR = 12.0
 
@@ -41,11 +44,14 @@ def rolling_return(rs: ReturnSeries, window_months: int) -> ReturnSeries:
     case — returns an **empty** ``ReturnSeries``: never a padded or partial
     window (``spec-analytics §4`` acceptance).
     """
+    require_frequency(rs, Frequency.MONTHLY)
     if window_months < 1:
         raise ValueError(f"window_months must be >= 1, got {window_months}")
     n = len(rs)
     if n < window_months:
-        return ReturnSeries(dates=(), values=np.array([], dtype=np.float64), base=rs.base)
+        return ReturnSeries(
+            dates=(), values=np.array([], dtype=np.float64), frequency=rs.frequency, base=rs.base
+        )
     dates: list[date] = []
     values: list[float] = []
     for end_i in range(window_months - 1, n):
@@ -54,7 +60,12 @@ def rolling_return(rs: ReturnSeries, window_months: int) -> ReturnSeries:
         annualised = (1.0 + compounded) ** (_MONTHS_PER_YEAR / window_months) - 1.0
         dates.append(rs.dates[end_i])
         values.append(annualised)
-    return ReturnSeries(dates=tuple(dates), values=np.array(values, dtype=np.float64), base=rs.base)
+    return ReturnSeries(
+        dates=tuple(dates),
+        values=np.array(values, dtype=np.float64),
+        frequency=rs.frequency,
+        base=rs.base,
+    )
 
 
 def rolling_returns(rs: ReturnSeries) -> dict[str, ReturnSeries]:

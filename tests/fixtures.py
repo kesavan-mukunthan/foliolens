@@ -10,6 +10,7 @@ import numpy as np
 from foliolens.model.investments import SeriesInvestment, ShareClass
 from foliolens.model.sources import PricedSource
 from foliolens.model.value_objects import NavSeries, ReturnSeries
+from foliolens.returns.frequency import Frequency
 
 # The return-space Investment (id + materialised ReturnSeries, no NAV, no I/O)
 # now lives in the model as SeriesInvestment. Tests use it directly; the old
@@ -43,6 +44,7 @@ def returns_series(
     return ReturnSeries(
         dates=month_end_dates(len(arr), start_year, start_month),
         values=arr,
+        frequency=Frequency.MONTHLY,
     )
 
 
@@ -95,5 +97,5 @@ def rf_investment() -> FixedReturnsInvestment:
     values = np.full(36, monthly_r, dtype=np.float64)
     return FixedReturnsInvestment(
         id="rf-fixture",
-        returns_series=ReturnSeries(dates=dates, values=values),
+        returns_series=ReturnSeries(dates=dates, values=values, frequency=Frequency.MONTHLY),
     )

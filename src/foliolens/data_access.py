@@ -23,6 +23,7 @@ from .benchmark_map import (
     load_benchmark_map,
 )
 from .model.value_objects import NavSeries
+from .returns.calendar import TradingCalendar, derive_calendar
 
 #: Env var naming the canonical data root (nav.parquet, index_nav.parquet,
 #: scheme_master.parquet all in one directory) — every ``--data-dir`` CLI
@@ -215,3 +216,13 @@ class DataAccess:
                 )
 
         return cast("pa.Table", result.to_arrow_table())
+
+    def derive_trading_calendar(self, amfi_codes: Sequence[str]) -> TradingCalendar:
+        """Derive the trading calendar for ``amfi_codes`` from their NAV panel.
+
+        Loads the panel via :meth:`load_nav_panel` (the sole parquet-reading
+        seam) and delegates the derivation itself to
+        :func:`foliolens.returns.calendar.derive_calendar`.
+        """
+        panel = self.load_nav_panel(amfi_codes)
+        return derive_calendar(panel, amfi_codes)

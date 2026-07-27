@@ -15,6 +15,19 @@ import numpy.typing as npt
 
 from foliolens.model.value_objects import ReturnSeries
 
+from ..returns.frequency import Frequency
+
+
+def require_frequency(rs: ReturnSeries, expected: Frequency) -> None:
+    """Raise ValueError if ``rs.frequency`` != ``expected``.
+
+    ``spec-analytics``: no cross-frequency series use — a metric that fixes a
+    convention (an annualisation factor, a daily-NAV basis) must reject a
+    series declaring the wrong one rather than silently misapplying it.
+    """
+    if rs.frequency != expected:
+        raise ValueError(f"frequency mismatch: expected {expected}, got {rs.frequency}")
+
 
 def align_dated(
     a: ReturnSeries, b: ReturnSeries
@@ -27,7 +40,12 @@ def align_dated(
     date-dropping projection for scalar metrics, and dated two-series results
     (excess-return *series*) build on this so the join lives in one place
     (``spec-analytics §2``: "no metric re-implements a join inline").
+
+    Raises ValueError if ``a`` and ``b`` declare different frequencies — a
+    monthly/daily join is never a meaningful date-alignment.
     """
+    if a.frequency != b.frequency:
+        raise ValueError(f"frequency mismatch: {a.frequency} vs {b.frequency}")
     b_index: dict[date, int] = {d: i for i, d in enumerate(b.dates)}
     dates_out: list[date] = []
     a_out: list[float] = []
@@ -77,5 +95,6 @@ def between(rs: ReturnSeries, start: date, end: date) -> ReturnSeries:
     return ReturnSeries(
         dates=rs.dates[lo:hi],
         values=rs.values[lo:hi],
+        frequency=rs.frequency,
         base=rs.base,
     )

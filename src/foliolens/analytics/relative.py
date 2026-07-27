@@ -68,7 +68,7 @@ def excess_return(fund: ReturnSeries, benchmark: ReturnSeries) -> ReturnSeries:
     dates, r, rb = align_dated(fund, benchmark)
     if len(dates) < 1:
         raise ValueError("excess_return needs >= 1 overlapping period")
-    return ReturnSeries(dates=dates, values=r - rb, base=fund.base)
+    return ReturnSeries(dates=dates, values=r - rb, frequency=fund.frequency, base=fund.base)
 
 
 # ---------------------------------------------------------------------------
@@ -203,8 +203,10 @@ def jensens_alpha(
     """
     # Align fund↔benchmark first, then intersect with rf, so all three share dates.
     dates_fb, r_fb, rb_fb = align_dated(fund, benchmark)
-    paired = ReturnSeries(dates=dates_fb, values=r_fb, base=fund.base)
-    bench_paired = ReturnSeries(dates=dates_fb, values=rb_fb, base=benchmark.base)
+    paired = ReturnSeries(dates=dates_fb, values=r_fb, frequency=fund.frequency, base=fund.base)
+    bench_paired = ReturnSeries(
+        dates=dates_fb, values=rb_fb, frequency=benchmark.frequency, base=benchmark.base
+    )
     dates, r, f = align_dated(paired, rf)
     _, rb, _ = align_dated(bench_paired, rf)
     n = len(dates)
@@ -357,20 +359,33 @@ def _rolling_pair(
     dates, r, rb = align_dated(fund, benchmark)
     n = len(dates)
     if n < window_months:
-        return ReturnSeries(dates=(), values=np.array([], dtype=np.float64), base=fund.base)
+        return ReturnSeries(
+            dates=(), values=np.array([], dtype=np.float64), frequency=fund.frequency, base=fund.base
+        )
     out_dates: list[date] = []
     out_values: list[float] = []
     for end_i in range(window_months - 1, n):
         start_i = end_i - window_months + 1
         window_dates = dates[start_i : end_i + 1]
-        f_slice = ReturnSeries(dates=window_dates, values=r[start_i : end_i + 1], base=fund.base)
+        f_slice = ReturnSeries(
+            dates=window_dates,
+            values=r[start_i : end_i + 1],
+            frequency=fund.frequency,
+            base=fund.base,
+        )
         b_slice = ReturnSeries(
-            dates=window_dates, values=rb[start_i : end_i + 1], base=benchmark.base
+            dates=window_dates,
+            values=rb[start_i : end_i + 1],
+            frequency=benchmark.frequency,
+            base=benchmark.base,
         )
         out_dates.append(dates[end_i])
         out_values.append(fn(f_slice, b_slice))
     return ReturnSeries(
-        dates=tuple(out_dates), values=np.array(out_values, dtype=np.float64), base=fund.base
+        dates=tuple(out_dates),
+        values=np.array(out_values, dtype=np.float64),
+        frequency=fund.frequency,
+        base=fund.base,
     )
 
 

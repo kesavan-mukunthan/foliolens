@@ -7,13 +7,17 @@ shares the daily route and is reported **per-period, never annualised**.
 
 Two layers, per ``spec-analytics §3``:
 
-* **Pure functions**, periodicity-agnostic over ``ReturnSeries`` / ``ValueIndex``
-  — they do not know or care whether the series is daily or monthly:
-  :func:`max_drawdown`, :func:`drawdown`, :func:`var_historical`, :func:`cvar`.
+* **Pure functions** over ``ReturnSeries`` / ``ValueIndex``. The ``ReturnSeries``
+  entry points (:func:`max_drawdown`, :func:`var_historical`, :func:`cvar`) fix
+  the daily convention and assert ``Frequency.DAILY`` — this family never
+  silently accepts a monthly series (``spec-analytics``: no cross-frequency
+  series use). :func:`drawdown` / :func:`underwater` take a ``ValueIndex``,
+  which carries no frequency tag, so they stay periodicity-agnostic by
+  construction; in practice the daily adapters are their only caller.
 * **Daily adapters** — ``*_of(investment)`` — that derive the daily series from
   ``investment.source`` and feed the pure functions. This is what makes the
-  family "daily-basis": the pure functions stay periodicity-agnostic; the
-  adapter chooses daily.
+  family "daily-basis": the adapter is what actually chooses daily; the pure
+  functions enforce that choice at entry where they can.
 
 Seam discipline (``CLAUDE.md`` → *Money & precision*): the daily NAV converts to
 float **once**, through ``returns/convert.py`` (``to_returns`` → ``to_index``);
@@ -37,6 +41,8 @@ from foliolens.model.investments import Investment
 from foliolens.model.value_objects import ReturnSeries, ValueIndex
 
 from ..returns.convert import to_index, to_returns
+from ..returns.frequency import Frequency
+from .series_ops import require_frequency
 
 _VAR_CUTOFF = 0.05  # 95% VaR/CVaR — the spec-analytics §3 confidence level
 
@@ -94,11 +100,14 @@ class Drawdown:
 def max_drawdown(rs: ReturnSeries) -> float:
     """Maximum drawdown of ``rs`` as a fraction ≤ 0 (0.0 if never underwater).
 
-    Periodicity-agnostic: the same operation on a daily- or monthly-derived
-    series. Seeds a pre-period peak so a first-period decline counts, matching
-    ``empyrical.max_drawdown`` (own↔oracle ≤ 1e-6). Scale-invariant, so the base
-    level (100) does not affect the result.
+    Fixed to the daily convention (asserts ``Frequency.DAILY``) — a monthly
+    series would silently smooth away an intra-month trough into a misleading
+    shallower (or zero) drawdown, so it is rejected outright rather than
+    computed on. Seeds a pre-period peak so a first-period decline counts,
+    matching ``empyrical.max_drawdown`` (own↔oracle ≤ 1e-6). Scale-invariant,
+    so the base level (100) does not affect the result.
     """
+    require_frequency(rs, Frequency.DAILY)
     if len(rs) < 1:
         raise ValueError("max_drawdown needs >= 1 return")
     levels = _seeded_levels(rs)
@@ -120,7 +129,7 @@ def underwater(idx: ValueIndex) -> ReturnSeries:
         raise ValueError("underwater needs >= 1 level")
     running_max = np.fmax.accumulate(idx.levels)
     dd = (idx.levels - running_max) / running_max
-    return ReturnSeries(dates=idx.dates, values=dd)
+    return ReturnSeries(dates=idx.dates, values=dd, frequency=Frequency.DAILY)
 
 
 def drawdown(idx: ValueIndex) -> Drawdown:
@@ -166,6 +175,7 @@ def var_historical(rs: ReturnSeries, cutoff: float = _VAR_CUTOFF) -> float:
     **per-period, never annualised** — the daily adapter feeds daily returns and
     the figure stays a daily quantity. Matches ``empyrical.value_at_risk``.
     """
+    require_frequency(rs, Frequency.DAILY)
     if len(rs) < 1:
         raise ValueError("var_historical needs >= 1 return")
     return float(np.percentile(rs.values, 100.0 * cutoff))
@@ -179,6 +189,7 @@ def cvar(rs: ReturnSeries, cutoff: float = _VAR_CUTOFF) -> float:
     ``int((n−1)·cutoff)`` (inclusive) so own↔oracle holds at ≤ 1e-6. Per-period,
     never annualised. Matches ``empyrical.conditional_value_at_risk``.
     """
+    require_frequency(rs, Frequency.DAILY)
     n = len(rs)
     if n < 1:
         raise ValueError("cvar needs >= 1 return")
@@ -197,7 +208,7 @@ def _daily_returns(investment: Investment) -> ReturnSeries:
     No month-end resampling: drawdown/VaR/CVaR read the *raw* daily NAV so an
     intra-month trough is captured, not smoothed to a month-end point.
     """
-    return to_returns(investment.source.value_series)
+    return to_returns(investment.source.value_series, frequency=Frequency.DAILY)
 
 
 def _daily_levels(investment: Investment) -> ValueIndex:

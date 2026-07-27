@@ -14,6 +14,8 @@ from decimal import Decimal
 
 import numpy as np
 
+from ..returns.frequency import Frequency
+
 
 def _build_nav_data(
     rows: Iterable[tuple[date, Decimal]],
@@ -83,6 +85,7 @@ class ReturnSeries:
 
     dates: tuple[date, ...]
     values: np.ndarray
+    frequency: Frequency
     base: Decimal = Decimal("100")
 
     def __post_init__(self) -> None:

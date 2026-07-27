@@ -150,7 +150,9 @@ def _trailing(rs: ReturnSeries, months: int) -> ReturnSeries | None:
     if len(rs) < months:
         return None
     lo = len(rs) - months
-    return ReturnSeries(dates=rs.dates[lo:], values=rs.values[lo:], base=rs.base)
+    return ReturnSeries(
+        dates=rs.dates[lo:], values=rs.values[lo:], frequency=rs.frequency, base=rs.base
+    )
 
 
 def build_metrics(

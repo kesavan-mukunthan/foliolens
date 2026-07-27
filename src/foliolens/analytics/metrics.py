@@ -19,7 +19,8 @@ import numpy.typing as npt
 
 from foliolens.model.value_objects import ReturnSeries
 
-from .series_ops import align, between
+from ..returns.frequency import Frequency
+from .series_ops import align, between, require_frequency
 
 _MONTHS_PER_YEAR = 12.0
 
@@ -43,6 +44,7 @@ def volatility(rs: ReturnSeries) -> float:
 
     Matches ``empyrical.annual_volatility(..., period='monthly')``.
     """
+    require_frequency(rs, Frequency.MONTHLY)
     if len(rs) < 2:
         raise ValueError(f"volatility needs >= 2 returns, got {len(rs)}")
     return float(np.std(rs.values, ddof=1) * np.sqrt(_MONTHS_PER_YEAR))
@@ -66,6 +68,7 @@ def downside_deviation(rs: ReturnSeries, mar: ReturnSeries) -> float:
     never a scalar. Aligned to ``rs`` on dates via :func:`align`; only the
     overlap contributes.
     """
+    require_frequency(rs, Frequency.MONTHLY)
     r, m = align(rs, mar)
     if len(r) < 1:
         raise ValueError("downside_deviation needs >= 1 overlapping return")
@@ -79,6 +82,7 @@ def sharpe(rs: ReturnSeries, rf: ReturnSeries) -> float:
     Matches ``empyrical.sharpe_ratio(..., period='monthly')`` when rf is passed
     as the same per-period series.
     """
+    require_frequency(rs, Frequency.MONTHLY)
     r, f = align(rs, rf)
     if len(r) < 2:
         raise ValueError(f"sharpe needs >= 2 overlapping returns, got {len(r)}")
@@ -98,6 +102,7 @@ def sortino(rs: ReturnSeries, rf: ReturnSeries) -> float:
     (``information_ratio``'s zero-TE, ``treynor``'s zero-beta), rather than
     surfacing a raw ``ZeroDivisionError`` to the caller.
     """
+    require_frequency(rs, Frequency.MONTHLY)
     r, f = align(rs, rf)
     if len(r) < 2:
         raise ValueError(f"sortino needs >= 2 overlapping returns, got {len(r)}")
@@ -118,6 +123,7 @@ def calmar(rs: ReturnSeries) -> float:
     is defined over the return series. Returns NaN when the series never draws
     down (no finite ratio exists), matching the oracle.
     """
+    require_frequency(rs, Frequency.MONTHLY)
     if len(rs) < 1:
         raise ValueError("calmar needs >= 1 return")
     values = rs.values

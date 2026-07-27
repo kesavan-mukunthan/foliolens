@@ -1,8 +1,9 @@
 """§4 distribution statistics over ``ReturnSeries`` — % positive, best/worst,
 skew, kurtosis.
 
-Pure and periodicity-agnostic over the monthly analytical series, mirroring
-§2. Skew and kurtosis use the bias-corrected (sample) estimators — the
+Pure over the monthly analytical series (fixed per ``spec-analytics``: every
+entry point asserts ``Frequency.MONTHLY``), mirroring §2. Skew and kurtosis
+use the bias-corrected (sample) estimators — the
 Fisher-Pearson adjusted skewness and Fisher's adjusted excess kurtosis — which
 match ``pandas.Series.skew()`` / ``.kurt()`` and
 ``scipy.stats.skew(..., bias=False)`` / ``scipy.stats.kurtosis(..., bias=False)``
@@ -15,12 +16,16 @@ import numpy as np
 
 from foliolens.model.value_objects import ReturnSeries
 
+from ..returns.frequency import Frequency
+from .series_ops import require_frequency
+
 
 def pct_positive(rs: ReturnSeries) -> float:
     """Fraction of periods with a strictly positive return, in ``[0, 1]``.
 
     A zero return does not count as positive (it is not a gain).
     """
+    require_frequency(rs, Frequency.MONTHLY)
     if len(rs) < 1:
         raise ValueError("pct_positive needs >= 1 return")
     return float(np.mean(rs.values > 0.0))
@@ -28,6 +33,7 @@ def pct_positive(rs: ReturnSeries) -> float:
 
 def best_period(rs: ReturnSeries) -> float:
     """The single largest per-period return in the series."""
+    require_frequency(rs, Frequency.MONTHLY)
     if len(rs) < 1:
         raise ValueError("best_period needs >= 1 return")
     return float(np.max(rs.values))
@@ -35,6 +41,7 @@ def best_period(rs: ReturnSeries) -> float:
 
 def worst_period(rs: ReturnSeries) -> float:
     """The single smallest (most negative) per-period return in the series."""
+    require_frequency(rs, Frequency.MONTHLY)
     if len(rs) < 1:
         raise ValueError("worst_period needs >= 1 return")
     return float(np.min(rs.values))
@@ -48,6 +55,7 @@ def skew(rs: ReturnSeries) -> float:
     ``pandas.Series.skew()`` / ``scipy.stats.skew(bias=False)``. Requires
     ``n >= 3`` (the ``n-2`` denominator is undefined below that).
     """
+    require_frequency(rs, Frequency.MONTHLY)
     n = len(rs)
     if n < 3:
         raise ValueError(f"skew needs >= 3 returns, got {n}")
@@ -67,6 +75,7 @@ def kurtosis(rs: ReturnSeries) -> float:
     ``pandas.Series.kurt()`` / ``scipy.stats.kurtosis(fisher=True, bias=False)``.
     Requires ``n >= 4`` (the ``(n-2)(n-3)`` denominator is undefined below that).
     """
+    require_frequency(rs, Frequency.MONTHLY)
     n = len(rs)
     if n < 4:
         raise ValueError(f"kurtosis needs >= 4 returns, got {n}")
