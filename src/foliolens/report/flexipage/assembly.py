@@ -23,12 +23,21 @@ Two phases, mirroring the natural dependency:
 Nulls are explicit everywhere (insufficient history, a metric that could not
 be computed, or a value that came out non-finite) — never a fabricated figure,
 never a raised error propagating out of one fund into the whole build.
+
+The per-fund ``series`` block (:func:`_growth_of_10k`, :func:`_underwater_series`)
+is a distinct, chart-only sibling of ``rolling``: month-end grain, visual-grade
+float, never a figure of record (the headline max-drawdown metric stays the
+daily-basis ``max_drawdown_SI`` already in ``metrics``). Both are derived
+straight through the existing ``returns/convert.to_index`` seam — no new
+spec-analytics metric convention, only a different base level and a longer
+(unwindowed) slice than the rolling panels use.
 """
 from __future__ import annotations
 
 import math
 from dataclasses import dataclass
 from datetime import date
+from decimal import Decimal
 
 import numpy as np
 
@@ -40,13 +49,15 @@ from foliolens.analytics import (
     rank_history,
 )
 from foliolens.analytics import relative as relative_metrics
+from foliolens.analytics.drawdown import underwater
 from foliolens.analytics.metrics import period_return_abs
 from foliolens.analytics.relative import RELATIVE_ROLLING_WINDOWS, rolling_excess_return
-from foliolens.analytics.series_ops import between
+from foliolens.analytics.series_ops import align_dated, between
 from foliolens.benchmark_map import TIER1
 from foliolens.model.investments import Investment
 from foliolens.model.sources import ReturnSource
 from foliolens.model.value_objects import ReturnSeries
+from foliolens.returns.convert import to_index
 from foliolens.returns.engine import period_return
 
 #: Artifact schema version for this page's durable output (``spec-flexicap-page §3``).
@@ -111,7 +122,14 @@ _RANK_HISTORY_PANEL: dict[str, str] = {
     "return_5Y": "rolling_return_5Y",
     "excess_return_1Y": "rolling_excess_return_1Y",
     "excess_return_3Y": "rolling_excess_return_3Y",
+    "sharpe_1Y": "rolling_sharpe_1Y",
+    "sharpe_3Y": "rolling_sharpe_3Y",
 }
+
+#: Base level for the "growth of ₹10,000" chart series (spec-flexicap-page
+#: §4 chart wiring) — a display convention, distinct from the analytics
+#: layer's own ``Decimal("100")`` return-series base.
+_GROWTH_OF_10K_BASE = Decimal("10000")
 
 
 def _safe_float(value: float) -> float | None:
@@ -236,6 +254,51 @@ def benchmark_block(
     return {"stated": stated_code, "tier": tier, "yardstick": yardstick_code}
 
 
+def _growth_of_10k(
+    fund_rs: ReturnSeries, yardstick_rs: ReturnSeries
+) -> dict[str, list[dict[str, object]]] | None:
+    """Month-end growth of ₹10,000, fund vs category yardstick, over their
+    common month-end history (chart-only series, ``spec-flexicap-page §4``).
+
+    Both legs rebase to the *same* ₹10,000 start so the chart reads as a
+    genuine side-by-side comparison, not two independently-based curves.
+    ``None`` when the fund and yardstick share no common month-end date
+    (never a fabricated single-point chart).
+    """
+    dates, fund_vals, yardstick_vals = align_dated(fund_rs, yardstick_rs)
+    if not dates:
+        return None
+    fund_idx = to_index(
+        ReturnSeries(dates=dates, values=fund_vals, base=_GROWTH_OF_10K_BASE)
+    )
+    yardstick_idx = to_index(
+        ReturnSeries(dates=dates, values=yardstick_vals, base=_GROWTH_OF_10K_BASE)
+    )
+    return {
+        "fund": [
+            {"date": d.isoformat(), "value": float(v)}
+            for d, v in zip(fund_idx.dates, fund_idx.levels)
+        ],
+        "yardstick": [
+            {"date": d.isoformat(), "value": float(v)}
+            for d, v in zip(yardstick_idx.dates, yardstick_idx.levels)
+        ],
+    }
+
+
+def _underwater_series(fund_rs: ReturnSeries) -> list[dict[str, object]]:
+    """Month-end drawdown-from-peak over the fund's full monthly history
+    (chart-only series, ``spec-flexicap-page §4``) — the headline
+    ``max_drawdown_SI`` figure stays the daily-basis metric already in
+    ``metrics``; this is a coarser, monthly-grain companion for the chart.
+    """
+    uw = underwater(to_index(fund_rs))
+    return [
+        {"date": d.isoformat(), "value": float(v)}
+        for d, v in zip(uw.dates, uw.values)
+    ]
+
+
 @dataclass(frozen=True)
 class FundPanel:
     """One fund's F1 entry, before cross-sectional ranking is layered on."""
@@ -248,6 +311,7 @@ class FundPanel:
     calendar_years: dict[str, float | None]
     alpha: dict[str, dict[str, object] | None]
     rolling: dict[str, tuple[SeriesPoint, ...]]
+    series: dict[str, object]
 
 
 def build_fund_panel(
@@ -292,6 +356,16 @@ def build_fund_panel(
             SeriesPoint(date=d, value=float(v))
             for d, v in zip(panel.dates, panel.values)
         )
+        sharpe_panel = relative_metrics.rolling_sharpe(fund_rs, rf_rs, months)
+        rolling[f"rolling_sharpe_{label}"] = tuple(
+            SeriesPoint(date=d, value=float(v))
+            for d, v in zip(sharpe_panel.dates, sharpe_panel.values)
+        )
+
+    series: dict[str, object] = {
+        "growth_10k": _growth_of_10k(fund_rs, yardstick_rs),
+        "underwater": _underwater_series(fund_rs),
+    }
 
     alpha: dict[str, dict[str, object] | None] = {}
     for label, months in _RELATIVE_WINDOWS.items():
@@ -320,6 +394,7 @@ def build_fund_panel(
         calendar_years=calendar_year_returns(fund_rs),
         alpha=alpha,
         rolling=rolling,
+        series=series,
     )
 
 
@@ -457,6 +532,7 @@ def assemble_universe(
                     name: [pt.to_dict() for pt in pts]
                     for name, pts in p.rolling.items()
                 },
+                "series": p.series,
                 "ranks": fund_ranks,
                 "commentary": None,
             }

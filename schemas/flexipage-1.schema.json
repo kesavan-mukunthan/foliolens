@@ -116,6 +116,38 @@
         "generated_at": { "type": "string" }
       }
     },
+    "growth10kBlock": {
+      "type": "object",
+      "required": ["fund", "yardstick"],
+      "additionalProperties": false,
+      "properties": {
+        "fund": {
+          "type": "array",
+          "items": { "$ref": "#/$defs/seriesPoint" }
+        },
+        "yardstick": {
+          "type": "array",
+          "items": { "$ref": "#/$defs/seriesPoint" }
+        }
+      }
+    },
+    "seriesBlock": {
+      "description": "Chart-only, month-end-grain series (spec-flexicap-page §4) — visual-grade float, never a figure of record. Sibling of `rolling` (the cross-sectionally rank-backed analytics panels), not a replacement for it.",
+      "type": "object",
+      "required": ["growth_10k", "underwater"],
+      "additionalProperties": false,
+      "properties": {
+        "growth_10k": {
+          "anyOf": [{ "$ref": "#/$defs/growth10kBlock" }, { "type": "null" }],
+          "description": "Month-end growth of ₹10,000, fund vs category yardstick, over their common history. Null when the fund and yardstick share no common month-end date."
+        },
+        "underwater": {
+          "type": "array",
+          "items": { "$ref": "#/$defs/seriesPoint" },
+          "description": "Month-end drawdown-from-peak for the fund. The headline max-drawdown figure remains the daily-basis `metrics.max_drawdown_SI`."
+        }
+      }
+    },
     "fundEntry": {
       "type": "object",
       "required": [
@@ -157,6 +189,7 @@
             "items": { "$ref": "#/$defs/seriesPoint" }
           }
         },
+        "series": { "$ref": "#/$defs/seriesBlock" },
         "ranks": {
           "type": "object",
           "additionalProperties": { "$ref": "#/$defs/rankEntry" }

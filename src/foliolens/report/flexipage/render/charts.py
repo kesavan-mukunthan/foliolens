@@ -4,8 +4,8 @@ Every chart reads a series straight off the parsed ``metrics.json`` fund
 entry; none is computed here. A chart whose backing series is absent or empty
 returns ``None`` and the template omits it entirely — never an empty axes
 frame (spec-flexicap-page §7-F2's "skip a chart cleanly" rule applies equally
-to a young fund's empty rolling panel and to a panel the current F1 artifact
-does not emit at all).
+to a young fund's empty rolling panel and to a fund/yardstick pair with no
+common month-end date).
 """
 from __future__ import annotations
 
@@ -24,15 +24,6 @@ import matplotlib.pyplot as plt  # noqa: E402 - backend must be set first
 _FIGSIZE = (6.4, 3.2)
 _DPI = 100
 
-#: Forward-compatible rolling-panel keys for the two NAV-based charts. The
-#: current F1 artifact (report/flexipage/assembly.py) does not emit these —
-#: `rolling` is an open map (schemas/flexipage-1.schema.json), so both charts
-#: are wired up and will activate with zero F2 changes the day F1 adds them;
-#: until then they skip cleanly for every fund.
-NAV_GROWTH_FUND_KEY = "growth_10k_fund"
-NAV_GROWTH_YARDSTICK_KEY = "growth_10k_yardstick"
-DRAWDOWN_KEY = "drawdown"
-
 
 def _svg(fig: Any) -> str:
     buf = io.StringIO()
@@ -48,9 +39,11 @@ def _dates_values(points: list[dict[str, Any]]) -> tuple[list[date], list[float]
 
 
 def growth_of_10k_chart(fund: dict[str, Any]) -> str | None:
-    rolling = fund.get("rolling", {})
-    fund_series = rolling.get(NAV_GROWTH_FUND_KEY)
-    yardstick_series = rolling.get(NAV_GROWTH_YARDSTICK_KEY)
+    block = fund.get("series", {}).get("growth_10k")
+    if not block:
+        return None
+    fund_series = block.get("fund")
+    yardstick_series = block.get("yardstick")
     if not fund_series or not yardstick_series:
         return None
     fig, ax = plt.subplots(figsize=_FIGSIZE, dpi=_DPI)
@@ -73,7 +66,7 @@ def growth_of_10k_chart(fund: dict[str, Any]) -> str | None:
 
 
 def drawdown_chart(fund: dict[str, Any]) -> str | None:
-    series = fund.get("rolling", {}).get(DRAWDOWN_KEY)
+    series = fund.get("series", {}).get("underwater")
     if not series:
         return None
     fig, ax = plt.subplots(figsize=_FIGSIZE, dpi=_DPI)
@@ -83,6 +76,17 @@ def drawdown_chart(fund: dict[str, Any]) -> str | None:
     ax.plot(d, pct, color="firebrick", linewidth=1)  # type: ignore[arg-type]
     ax.set_title("Drawdown")
     ax.set_ylabel("%")
+    # Month-end grain (chart-density series) — distinct from the headline
+    # max-drawdown figure, which stays the daily-basis metric; the axis is
+    # capped at 0 so float noise at the peak never reads as a gain.
+    ax.set_ylim(top=0)
+    ax.annotate(
+        "month-end basis",
+        xy=(0.01, 0.02),
+        xycoords="axes fraction",
+        fontsize=7,
+        color="dimgray",
+    )
     ax.grid(True, alpha=0.3)
     fig.autofmt_xdate()
     return _svg(fig)

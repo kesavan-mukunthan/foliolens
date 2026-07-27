@@ -30,9 +30,10 @@ series (``relative``) — ``excess_return``, ``tracking_error``,
 ``information_ratio``, ``beta``, ``correlation``, ``r_squared``,
 ``jensens_alpha`` (an ``AlphaResult`` carrying the t-stat + window), ``treynor``,
 ``up_capture`` / ``down_capture``, ``hit_rate``, and the rolling-relative panels
-(``rolling_excess_return`` / ``rolling_beta`` / ``rolling_correlation``,
-compositions over §4's windowing) — with the ``*_of`` adapters that read the
-fund's / benchmark's / rf's ``.returns`` (benchmark & rf as Investments).
+(``rolling_excess_return`` / ``rolling_beta`` / ``rolling_correlation`` /
+``rolling_sharpe``, compositions over §4's windowing) — with the ``*_of``
+adapters that read the fund's / benchmark's / rf's ``.returns`` (benchmark &
+rf as Investments).
 
 §7 (peer / cross-sectional): pure functions over a caller-supplied cohort
 (``peer``) — ``percentile_ranks`` over a ``{fund_id: value|None}`` map,
@@ -82,6 +83,7 @@ from .drawdown import (
     drawdown_of,
     max_drawdown,
     max_drawdown_of,
+    underwater,
     var_historical,
     var_historical_of,
 )
@@ -115,6 +117,7 @@ from .relative import (
     rolling_correlation,
     rolling_correlations,
     rolling_excess_return,
+    rolling_sharpe,
     tracking_error,
     treynor,
     up_capture,
@@ -135,6 +138,7 @@ __all__ = [
     "Drawdown",
     "max_drawdown",
     "drawdown",
+    "underwater",
     "var_historical",
     "cvar",
     "max_drawdown_of",
@@ -185,6 +189,7 @@ __all__ = [
     "rolling_excess_return",
     "rolling_beta",
     "rolling_correlation",
+    "rolling_sharpe",
     "rolling_betas",
     "rolling_correlations",
     # §6 benchmark-relative adapters
