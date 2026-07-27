@@ -28,6 +28,8 @@ from foliolens.ingest.land import land, land_index
 from foliolens.ingest.mftool_client import NavRecord
 from foliolens.ingest.scheme_master import SchemeMasterRecord, land_scheme_master
 from foliolens.report.flexipage.assembly import RANK_SPECS
+from foliolens.report.flexipage.commentary import PROMPT_VERSION
+from foliolens.report.flexipage.commentary import run as run_commentary
 from foliolens.report.flexipage.runner import IndexAnomalyError, load_universe, run
 from foliolens.data_access import DataAccess
 
@@ -378,6 +380,150 @@ def test_no_nan_or_inf_anywhere(artifact: dict[str, Any]) -> None:
 def test_commentary_is_null_placeholder(artifact: dict[str, Any]) -> None:
     for f in artifact["funds"]:
         assert f["commentary"] is None
+
+
+# ---------------------------------------------------------------------------
+# --carry-commentary: idempotent rebuild (spec-flexicap-page §5)
+# ---------------------------------------------------------------------------
+
+
+def _commentary_block(text: str, prompt_version: str) -> dict[str, Any]:
+    return {
+        "text": text,
+        "model": "claude-sonnet-4-6",
+        "prompt_version": prompt_version,
+        "generated_at": "2026-01-01T00:00:00+00:00",
+    }
+
+
+def test_carry_commentary_copies_matching_drops_stale_new_fund_stays_null(
+    tmp_path: Path, universe: dict[str, Path]
+) -> None:
+    """AAAA01's block matches the current prompt version -> carried. BBBB02's
+    is a stale version -> dropped (stays null, forcing regeneration). CCCC03
+    is absent from the previous artifact entirely (a fund new to the
+    universe) -> stays null.
+    """
+    previous_path = tmp_path / "previous_metrics.json"
+    previous_path.write_text(
+        json.dumps(
+            {
+                "schema_version": "flexipage-1",
+                "as_of": "2020-01-01",
+                "universe": {
+                    "category": "flexi_cap",
+                    "count": 2,
+                    "yardstick": "NIFTY500TRI",
+                    "aggregates": {},
+                },
+                "funds": [
+                    {
+                        "amfi_code": "AAAA01",
+                        "commentary": _commentary_block("Alpha carried.", PROMPT_VERSION),
+                    },
+                    {
+                        "amfi_code": "BBBB02",
+                        "commentary": _commentary_block("Beta stale.", "commentary-v3"),
+                    },
+                ],
+            }
+        ),
+        encoding="utf-8",
+    )
+
+    out_path = tmp_path / "out" / "metrics.json"
+    summary = run(
+        universe["data_dir"],
+        out_path,
+        rf_path=universe["rf_path"],
+        benchmark_map_path=universe["benchmark_map_path"],
+        carry_commentary_path=previous_path,
+    )
+    assert summary.carried_commentary == 1
+
+    with out_path.open() as fh:
+        written = json.load(fh)
+    aaaa = _fund(written, "AAAA01")
+    bbbb = _fund(written, "BBBB02")
+    cccc = _fund(written, "CCCC03")
+    assert aaaa["commentary"] == _commentary_block("Alpha carried.", PROMPT_VERSION)
+    assert bbbb["commentary"] is None
+    assert cccc["commentary"] is None
+
+
+def test_no_carry_commentary_path_leaves_everything_null(
+    tmp_path: Path, universe: dict[str, Path]
+) -> None:
+    out_path = tmp_path / "out" / "metrics.json"
+    summary = run(
+        universe["data_dir"],
+        out_path,
+        rf_path=universe["rf_path"],
+        benchmark_map_path=universe["benchmark_map_path"],
+    )
+    assert summary.carried_commentary == 0
+
+
+# ---------------------------------------------------------------------------
+# End-to-end: carry-forward + --only-missing -> zero API calls when nothing
+# changed (spec-flexicap-page §5, §7-F4 acceptance).
+# ---------------------------------------------------------------------------
+
+
+#: No digits anywhere, so no numeral token can ever be "fabricated" against
+#: any payload -- this is a stand-in for a real, validated model response,
+#: not a fixture under test in its own right.
+_GENERIC_CLEAN_COMMENTARY = (
+    "The fund's trailing performance sits close to the category benchmark "
+    "across recent history, with volatility and drawdown broadly in line "
+    "with peers in the same cohort under review this cycle for this fund "
+    "and its comparators across the period considered here overall in the "
+    "underlying data set available for this analysis without exception, "
+    "and none of the figures supplied point toward any particularly "
+    "distinctive reading worth calling out ahead of the rest.\n\n"
+    "Rolling and percentile-rank behaviour shows no marked divergence from "
+    "the broader peer group across the windows supplied, and no single "
+    "period stands out as distinctive relative to the rest of the cohort "
+    "under the same comparison basis used consistently throughout this "
+    "commentary today, leaving a broadly unremarkable overall picture for "
+    "this fund among its peers in the wider comparison set considered."
+)
+
+
+def test_carry_then_only_missing_makes_zero_api_calls(
+    tmp_path: Path, universe: dict[str, Path]
+) -> None:
+    first_path = tmp_path / "out" / "metrics_v1.json"
+    run(
+        universe["data_dir"],
+        first_path,
+        rf_path=universe["rf_path"],
+        benchmark_map_path=universe["benchmark_map_path"],
+    )
+
+    def stub(system: str, messages: list[dict[str, str]]) -> str:
+        return _GENERIC_CLEAN_COMMENTARY
+
+    first_summary = run_commentary(first_path, transport=stub)
+    assert first_summary.failed == 0
+    assert first_summary.generated == first_summary.total
+
+    second_path = tmp_path / "out" / "metrics_v2.json"
+    run(
+        universe["data_dir"],
+        second_path,
+        rf_path=universe["rf_path"],
+        benchmark_map_path=universe["benchmark_map_path"],
+        carry_commentary_path=first_path,
+    )
+
+    def never_call(system: str, messages: list[dict[str, str]]) -> str:
+        raise AssertionError("the API must never be called -- nothing changed")
+
+    second_summary = run_commentary(second_path, transport=never_call, only_missing=True)
+    assert second_summary.generated == 0
+    assert second_summary.failed == 0
+    assert second_summary.skipped_populated == second_summary.total
 
 
 # ---------------------------------------------------------------------------

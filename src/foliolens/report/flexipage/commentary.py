@@ -32,6 +32,16 @@ never load-bearing (§5): an absent ``ANTHROPIC_API_KEY``, or a fund whose
 response still violates the contract after that one retry, leaves that
 fund's ``commentary`` as ``null`` and the build continues. Calls are
 sequential — no concurrency (§5 spec text: one call per fund at build time).
+
+``--only-missing`` makes a rebuild idempotent: a fund whose ``commentary`` is
+already non-null is skipped entirely — no API call, no validation, its block
+left untouched. The F1 runner always assembles ``commentary: null`` for
+every fund, so on its own ``--only-missing`` would regenerate everything on
+every rebuild; its companion is the runner's ``--carry-commentary``, which
+copies forward matching-version blocks from the previous artifact before
+this module ever runs. Full idempotent refresh sequence (spec-flexicap-page
+§5): ``runner --carry-commentary prev.json`` → ``commentary --only-missing``
+→ ``render``.
 """
 from __future__ import annotations
 
@@ -509,16 +519,26 @@ class CommentarySummary:
     generated: int
     failed: int
     skipped_no_key: bool
+    skipped_populated: int = 0
 
 
 def run(
-    metrics_path: Path, *, transport: CommentaryTransport | None = None
+    metrics_path: Path,
+    *,
+    transport: CommentaryTransport | None = None,
+    only_missing: bool = False,
 ) -> CommentarySummary:
     """Generate commentary for every fund in ``metrics_path`` and rewrite it
     in place. ``transport`` overrides the default Anthropic call (tests only —
     the suite never calls the API); when omitted, an absent
     ``ANTHROPIC_API_KEY`` skips every fund (``commentary: null``, logged, no
     call attempted) rather than raising.
+
+    ``only_missing`` (default off — regenerate-all): a fund whose
+    ``commentary`` is already non-null is skipped entirely — no API call, no
+    :func:`validate_commentary`, its block left untouched in the artifact.
+    Pairs with the runner's ``--carry-commentary`` (spec-flexicap-page §5):
+    carry first, so unchanged funds already have a block to skip past.
     """
     data: dict[str, Any] = json.loads(metrics_path.read_text(encoding="utf-8"))
     funds: list[dict[str, Any]] = data["funds"]
@@ -538,7 +558,11 @@ def run(
 
     generated = 0
     failed = 0
+    skipped_populated = 0
     for fund in funds:
+        if only_missing and fund.get("commentary") is not None:
+            skipped_populated += 1
+            continue
         if transport is None:
             fund["commentary"] = None
             continue
@@ -559,6 +583,7 @@ def run(
         generated=generated,
         failed=failed,
         skipped_no_key=skipped_no_key,
+        skipped_populated=skipped_populated,
     )
 
 
@@ -567,10 +592,18 @@ def main(argv: list[str] | None = None) -> None:
         description="F4 batch commentary: generate + persist into metrics.json in place"
     )
     parser.add_argument("--metrics", required=True, type=Path, metavar="PATH")
+    parser.add_argument(
+        "--only-missing",
+        action="store_true",
+        help=(
+            "skip funds whose commentary is already non-null (no API call, "
+            "no validation, untouched) -- default regenerates every fund"
+        ),
+    )
     args = parser.parse_args(argv)
 
     logging.basicConfig(level=logging.INFO, format="%(levelname)s %(message)s")
-    summary = run(args.metrics)
+    summary = run(args.metrics, only_missing=args.only_missing)
     if summary.skipped_no_key:
         print(
             f"ANTHROPIC_API_KEY not set: wrote {summary.total} funds with "
@@ -579,7 +612,8 @@ def main(argv: list[str] | None = None) -> None:
     else:
         print(
             f"commentary: {summary.generated}/{summary.total} generated, "
-            f"{summary.failed} failed (null) -> {summary.metrics_path}"
+            f"{summary.failed} failed (null), {summary.skipped_populated} "
+            f"skipped (already populated) -> {summary.metrics_path}"
         )
 
 

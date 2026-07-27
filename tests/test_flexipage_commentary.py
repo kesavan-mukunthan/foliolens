@@ -540,6 +540,74 @@ def test_run_skips_all_funds_when_api_key_absent(
         assert fund["commentary"] is None
 
 
+# ---------------------------------------------------------------------------
+# run(only_missing=True): idempotent rebuild -- populated funds untouched
+# ---------------------------------------------------------------------------
+
+
+def test_run_only_missing_skips_populated_funds_with_zero_calls(tmp_path: Path) -> None:
+    populated_commentary = {
+        "text": "Pre-existing commentary, untouched.",
+        "model": "claude-sonnet-4-6",
+        "prompt_version": "commentary-v3",  # deliberately stale -- must still be left alone
+        "generated_at": "2026-01-01T00:00:00+00:00",
+    }
+    populated_fund = _fund("AAAA01")
+    populated_fund["commentary"] = populated_commentary
+    missing_fund = _fund("BBBB02")
+    assert missing_fund["commentary"] is None
+
+    metrics_path = tmp_path / "metrics.json"
+    _write_metrics(metrics_path, [populated_fund, missing_fund])
+
+    calls: list[str] = []
+
+    def stub(system: str, messages: list[dict[str, str]]) -> str:
+        calls.append(messages[0]["content"])
+        return _CLEAN_TEXT
+
+    summary = run(metrics_path, transport=stub, only_missing=True)
+    assert summary.total == 2
+    assert summary.generated == 1
+    assert summary.failed == 0
+    assert summary.skipped_populated == 1
+    # Only the missing fund's payload was ever sent -- no call for AAAA01.
+    assert len(calls) == 1
+    assert "AAAA01" not in "".join(calls)  # amfi_code never in payload anyway, belt+braces
+
+    data = json.loads(metrics_path.read_text(encoding="utf-8"))
+    aaaa = next(f for f in data["funds"] if f["amfi_code"] == "AAAA01")
+    bbbb = next(f for f in data["funds"] if f["amfi_code"] == "BBBB02")
+    # Untouched, byte-for-byte -- including its stale prompt_version.
+    assert aaaa["commentary"] == populated_commentary
+    assert bbbb["commentary"]["text"] == _CLEAN_TEXT
+
+
+def test_run_only_missing_false_default_regenerates_populated_fund(tmp_path: Path) -> None:
+    populated_fund = _fund("AAAA01")
+    populated_fund["commentary"] = {
+        "text": "Stale text.",
+        "model": "claude-sonnet-4-6",
+        "prompt_version": "commentary-v4",
+        "generated_at": "2026-01-01T00:00:00+00:00",
+    }
+    metrics_path = tmp_path / "metrics.json"
+    _write_metrics(metrics_path, [populated_fund])
+
+    calls = {"n": 0}
+
+    def stub(system: str, messages: list[dict[str, str]]) -> str:
+        calls["n"] += 1
+        return _CLEAN_TEXT
+
+    summary = run(metrics_path, transport=stub)  # only_missing defaults to False
+    assert calls["n"] == 1
+    assert summary.skipped_populated == 0
+
+    data = json.loads(metrics_path.read_text(encoding="utf-8"))
+    assert data["funds"][0]["commentary"]["text"] == _CLEAN_TEXT
+
+
 def test_run_builds_transport_from_env_key_without_network(
     tmp_path: Path, monkeypatch: pytest.MonkeyPatch
 ) -> None:

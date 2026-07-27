@@ -138,6 +138,17 @@ re-rounding outside the presentation layer.
   with the named violations. The check is one pure function, used
   identically by the runtime path and the F4 test suite, so it can never
   drift between them.
+- **Idempotent rebuild**: the F1 runner always assembles `commentary: null`
+  for every fund, so on its own a rebuild orphans any commentary already
+  generated. `commentary --only-missing` skips a fund whose `commentary` is
+  already non-null entirely (no API call, no validation, block untouched);
+  the runner's `--carry-commentary <previous-metrics.json>` copies each
+  fund's commentary block from the previous artifact by `amfi_code` first,
+  provided the block's `prompt_version` matches the current `PROMPT_VERSION`
+  — a stale-version block is dropped (a prompt bump forces regeneration),
+  and a fund absent from the previous artifact (new to the universe) stays
+  `null`. Refresh sequence: `runner --carry-commentary prev.json` →
+  `commentary --only-missing` → `render`.
 
 ### commentary-v4 (system prompt, verbatim — hash this text as the version)
 

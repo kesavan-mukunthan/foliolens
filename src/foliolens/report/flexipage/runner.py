@@ -10,6 +10,17 @@ analytics reads stored parquet only, ``CLAUDE.md``), and calls
 figure. A fund whose NAV fails to load or whose panel computation raises is
 recorded in ``failures`` and skipped — never silently dropped — and the whole
 build aborts if failures exceed 10% of the cohort.
+
+Every fund's ``commentary`` is assembled as ``null`` (F4 writes it, not this
+module); a plain rebuild therefore orphans any commentary already generated
+against the previous artifact. ``--carry-commentary <previous-metrics.json>``
+closes that gap by copying each fund's commentary block from the previous
+artifact by ``amfi_code`` (:func:`_carry_forward_commentary`), skipping a
+block whose ``prompt_version`` is stale so a prompt bump forces regeneration.
+The idempotent refresh sequence this pairs with (spec-flexicap-page §5):
+``runner --carry-commentary prev.json`` (carries unchanged funds forward) →
+``commentary --only-missing`` (generates only the still-null funds — no API
+call for the carried ones) → ``render``.
 """
 from __future__ import annotations
 
@@ -36,6 +47,7 @@ from foliolens.model.sources import PricedSource
 from foliolens.model.value_objects import NavSeries
 
 from .assembly import FundPanel, assemble_universe, build_fund_panel
+from .commentary import PROMPT_VERSION
 
 _LOG = logging.getLogger(__name__)
 
@@ -131,6 +143,7 @@ class BuildSummary:
     universe_count: int
     as_of: date
     out_path: Path
+    carried_commentary: int = 0
 
 
 def load_universe(
@@ -193,6 +206,34 @@ def _build_benchmark(data_access: DataAccess, index_code: str) -> Benchmark:
     return benchmark_from_index(_load_index_series_checked(data_access, index_code))
 
 
+def _carry_forward_commentary(artifact: dict[str, Any], previous_path: Path) -> int:
+    """Copy each fund's commentary block from ``previous_path``'s artifact by
+    ``amfi_code`` — the half of idempotent rebuild that makes ``commentary
+    --only-missing`` useful, since this runner otherwise writes every fund's
+    ``commentary: null`` on every build (spec-flexicap-page §5).
+
+    A block is carried only when its ``prompt_version`` matches the current
+    :data:`foliolens.report.flexipage.commentary.PROMPT_VERSION` — a stale-
+    version block is dropped (stays ``null``, already the assembled default),
+    so a prompt bump naturally forces regeneration rather than silently
+    carrying commentary written under a superseded contract. A fund absent
+    from the previous artifact (new to the universe) also stays ``null``.
+    Returns the number of funds carried.
+    """
+    previous = json.loads(previous_path.read_text(encoding="utf-8"))
+    previous_by_code: dict[str, Any] = {
+        f["amfi_code"]: f.get("commentary") for f in previous["funds"]
+    }
+
+    carried = 0
+    for fund in artifact["funds"]:
+        commentary = previous_by_code.get(fund["amfi_code"])
+        if commentary is not None and commentary.get("prompt_version") == PROMPT_VERSION:
+            fund["commentary"] = commentary
+            carried += 1
+    return carried
+
+
 def run(
     data_dir: Path,
     out_path: Path,
@@ -200,6 +241,7 @@ def run(
     rf_path: Path,
     as_of: date | None = None,
     benchmark_map_path: Path | str = DEFAULT_BENCHMARK_MAP,
+    carry_commentary_path: Path | None = None,
 ) -> BuildSummary:
     """Run the F1 batch end to end and write ``metrics.json``.
 
@@ -208,6 +250,12 @@ def run(
     anchor to the same date (required for cross-sectional ranks to be
     comparable). Raises if the universe is empty or failures exceed
     :data:`MAX_FAILURE_RATE` of the cohort.
+
+    ``carry_commentary_path``, when given, points at a previous build's
+    ``metrics.json``; matching-version commentary blocks are copied onto the
+    freshly-assembled artifact by ``amfi_code`` before it's written
+    (:func:`_carry_forward_commentary`) — see the module docstring for the
+    full refresh sequence.
     """
     data_access = DataAccess(data_dir)
     universe = load_universe(data_access, benchmark_map_path=benchmark_map_path)
@@ -285,6 +333,10 @@ def run(
         panels, as_of=as_of, category=CATEGORY, yardstick_code=yardstick_code
     )
 
+    carried_commentary = 0
+    if carry_commentary_path is not None:
+        carried_commentary = _carry_forward_commentary(artifact, carry_commentary_path)
+
     out_path.parent.mkdir(parents=True, exist_ok=True)
     with out_path.open("w", encoding="utf-8") as fh:
         json.dump(artifact, fh, allow_nan=False, indent=2)
@@ -305,6 +357,7 @@ def run(
         universe_count=total,
         as_of=as_of,
         out_path=out_path,
+        carried_commentary=carried_commentary,
     )
 
 
@@ -338,6 +391,18 @@ def main(argv: list[str] | None = None) -> None:
         metavar="YYYY-MM-DD",
         help="defaults to the latest last-NAV date across the loaded cohort",
     )
+    parser.add_argument(
+        "--carry-commentary",
+        dest="carry_commentary",
+        type=Path,
+        default=None,
+        metavar="PATH",
+        help=(
+            "previous metrics.json -- matching-version commentary blocks are "
+            "copied onto the freshly-assembled artifact by amfi_code before "
+            "it's written; stale-version or absent funds stay null"
+        ),
+    )
     args = parser.parse_args(argv)
 
     data_dir = args.data_dir or default_data_dir()
@@ -347,7 +412,11 @@ def main(argv: list[str] | None = None) -> None:
     logging.basicConfig(level=logging.INFO, format="%(levelname)s %(message)s")
     try:
         summary = run(
-            data_dir, args.out, rf_path=args.rf_path, as_of=args.as_of
+            data_dir,
+            args.out,
+            rf_path=args.rf_path,
+            as_of=args.as_of,
+            carry_commentary_path=args.carry_commentary,
         )
     except RuntimeError as exc:
         print(f"BUILD ABORTED: {exc}", file=sys.stderr)
@@ -358,6 +427,8 @@ def main(argv: list[str] | None = None) -> None:
         f"universe: {summary.universe_count} funds, {len(summary.panels)} loaded, "
         f"{len(summary.failures)} failed, as_of={summary.as_of.isoformat()}"
     )
+    if args.carry_commentary is not None:
+        print(f"commentary carried forward: {summary.carried_commentary}")
     for f in summary.failures:
         print(f"  FAILED {f.amfi_code} {f.scheme_name}: {f.reason}")
 
