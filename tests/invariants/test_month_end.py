@@ -6,12 +6,11 @@
 (c) adjacent monthly dates are exactly one calendar month apart
 (d) aligning two mismatched-frequency ``ReturnSeries`` raises
 
-RED (this commit): (a)-(c) run over the OLD path (``NavSeries.month_end()``
-+ ``to_returns``), which picks whatever NAV happens to exist per calendar
-month with no regard for completeness or the true month-end date. (d)
-exercises ``series_ops.align_dated``, which does not yet know about
-``Frequency`` at all. Step 1.7 repoints (a)-(c) at the new calendar-derived
-``monthly_returns`` path once it lands, at which point all four go green.
+GREEN (this commit): (a)-(c) run over the calendar-derived
+``returns/monthly.monthly_returns`` path — the trading calendar (from
+``DataAccess.derive_trading_calendar``) resolves the true last trading day
+of each month, and a month is only emitted once its next month has begun
+publishing. (d) exercises ``series_ops.align_dated``'s ``Frequency`` guard.
 """
 from __future__ import annotations
 
@@ -25,8 +24,8 @@ import pytest
 from foliolens.analytics.series_ops import align_dated
 from foliolens.data_access import DataAccess
 from foliolens.model.value_objects import ReturnSeries
-from foliolens.returns.convert import to_returns
 from foliolens.returns.frequency import Frequency
+from foliolens.returns.monthly import monthly_returns
 
 FIXTURES = Path(__file__).parent.parent.parent / "fixtures" / "nav_snapshots"
 _AMFI_CODE = "108466"
@@ -35,7 +34,8 @@ _AMFI_CODE = "108466"
 def _monthly_dates() -> tuple[date, ...]:
     da = DataAccess(FIXTURES)
     nav = da.load_nav_series(_AMFI_CODE)
-    return to_returns(nav.month_end(), frequency=Frequency.MONTHLY).dates
+    cal = da.derive_trading_calendar([_AMFI_CODE])
+    return monthly_returns(nav, cal).dates
 
 
 def _is_calendar_month_end(d: date) -> bool:

@@ -27,7 +27,12 @@ def align_dated(
     date-dropping projection for scalar metrics, and dated two-series results
     (excess-return *series*) build on this so the join lives in one place
     (``spec-analytics §2``: "no metric re-implements a join inline").
+
+    Raises ValueError if ``a`` and ``b`` declare different frequencies — a
+    monthly/daily join is never a meaningful date-alignment.
     """
+    if a.frequency != b.frequency:
+        raise ValueError(f"frequency mismatch: {a.frequency} vs {b.frequency}")
     b_index: dict[date, int] = {d: i for i, d in enumerate(b.dates)}
     dates_out: list[date] = []
     a_out: list[float] = []
