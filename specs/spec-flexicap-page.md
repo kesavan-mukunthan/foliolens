@@ -103,16 +103,22 @@ re-rounding outside the presentation layer.
 - One Anthropic API call per fund at build time, model **claude-sonnet-4-6**
   (relational fidelity across ~30 figures per fund is the binding constraint;
   cost is immaterial at this scale), system prompt = `commentary-v4`
-  (verbatim below), user message = the fund's entry from metrics.json
-  (metrics, calendar_years, ranks, universe aggregates) **minus**
-  `benchmark.stated`/`.tier` — those are page furniture for the tier-fallback
-  footnote, not commentary material, and are never sent to the model. The
-  only comparator identity the model receives is a single flat
-  `category_benchmark` field holding the category yardstick's display name
-  (e.g. `"Nifty 500 TRI"` — the same name F2 renders on the page), which
-  removes the benchmark/stated-vs-category-median conflation class entirely
-  rather than relying on a prompt rule to suppress it. Persisted into
-  metrics.json with model + prompt_version.
+  (verbatim below). Persisted into metrics.json with model + prompt_version.
+- **Payload diet** (`commentary_payload(fund, universe) -> dict`, unit-tested,
+  §7-F4): a real batch run at the previous payload shape cost ~35-40k input
+  tokens per call — the full artifact entry carries complete rolling panels
+  and rank histories the model never needed in full. The dedicated
+  commentary payload sent as the user message carries only: `fund` (`name`,
+  `fund_house`); `category_benchmark` — a single flat field holding the
+  category yardstick's display name (e.g. `"Nifty 500 TRI"`, the same name
+  F2 renders on the page) — with `benchmark.stated`/`.tier` dropped entirely
+  (page furniture for the tier-fallback footnote, not commentary material;
+  removes the benchmark/stated-vs-category-median conflation class at the
+  source rather than relying on a prompt rule to suppress it); `metrics`
+  and `calendar_years` as-is; `ranks` — latest percentile per metric-window
+  only; `rank_history_summary` and `rolling_summary` — each panel reduced to
+  four points (first, last, minimum, maximum), never the full series;
+  `universe` — `count` + `aggregates` only. No other fields.
 - Runs **locally only** this milestone; `ANTHROPIC_API_KEY` from env/`.env`
   (gitignored). Key never in either repo or artifacts. Build proceeds with
   `commentary: null` (block hidden) if key absent, a call fails after one
@@ -172,6 +178,9 @@ Rules — absolute:
 - Quote figures at no more than two decimal places. Express returns,
   volatility, tracking error and drawdown at percentage scale with
   the % symbol; never as raw fractions.
+- Rolling and rank-history data is supplied as summary points
+  (first, last, minimum, maximum). Describe movement using only
+  those points.
 - British English. 100-150 words, two paragraphs.
 
 Structure:
@@ -215,15 +224,21 @@ Output: plain text, two paragraphs, nothing else.
 - **F3 PDF**: Tests: PDF exists per fund; page count ≥1; disclaimer string
   present in extracted text.
 - **F4 Commentary**: `validate_commentary(text, input_json) -> list[str]` (§5)
-  is the single check, shared by the runtime retry path and the test suite:
-  **no-new-numbers** — every numeral token in output substring-matches the
-  input JSON (integers ≥2 digits and all decimals; ignore standalone
-  "1"/"2" paragraph-safe tokens); word count 100–170; exactly two
-  paragraphs; banned vocabulary list (buy, sell, avoid, attractive, will
-  outperform, top pick, must, yardstick, year-to-date) absent. Tests cover
-  the validator directly plus the retry path (a stub that violates once
-  then passes) and the null path (a stub that violates twice); offline
-  only — the suite never calls the API.
+  is the single check, shared by the runtime retry path and the test suite —
+  `input_json` is the diet payload (`commentary_payload`'s output, the
+  numbers the model was actually shown), not the full artifact entry:
+  **no-new-numbers** — every numeral token in output matches some payload
+  value, as a literal substring or at ×1/×100/×0.01 scale (integers ≥2
+  digits and all decimals; ignore standalone "1"/"2" paragraph-safe
+  tokens); word count 100–170; exactly two paragraphs; banned vocabulary
+  list (buy, sell, avoid, attractive, will outperform, top pick, must,
+  yardstick, year-to-date) absent. Tests cover the validator directly plus
+  the retry path (a stub that violates once then passes) and the null path
+  (a stub that violates twice); offline only — the suite never calls the
+  API. `commentary_payload` is separately unit-tested: no list in the
+  payload exceeds 4 elements, and the serialised payload stays under 16,000
+  characters (a rough chars/4 proxy for ~4,000 tokens) for the synthetic
+  fixture.
 - **F5 Publish**: manual checklist, not automated: Pages URL loads, Bandhan
   page + PDF spot-checked against factsheet, no raw-data files in site repo.
 

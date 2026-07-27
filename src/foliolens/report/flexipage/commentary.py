@@ -14,10 +14,16 @@ benchmark/category-median conflation, and misread percentile direction; a v2
 (claude-sonnet-4-6) smoke test fixed those but still overran the word budget
 and, once, wrote "year-to-date" for a closed calendar year; a v3 smoke test
 was clean on every named rule but once quoted a raw fraction instead of a
-percentage. v4 closes that (a formatting rule) and, separately, removes the
-stated-benchmark/tier fields from the model's input entirely
-(:func:`build_user_payload`) — the source of the benchmark/category-median
-conflation class is now absent from the prompt, not just discouraged in it.
+percentage. v4 closes that (a formatting rule), removes the stated-benchmark/
+tier fields from the model's input entirely — the source of the benchmark/
+category-median conflation class is now absent from the prompt, not just
+discouraged in it — and diets the payload itself (:func:`commentary_payload`):
+a real batch run showed ~35-40k input tokens per call, because the full
+artifact entry carries complete rolling panels and rank histories the model
+never needed in full. Rolling/rank-history series are reduced to four
+summary points (first, last, min, max) before the call, and the prompt says
+so explicitly, so the model describes movement from what it was actually
+shown rather than reaching for points it wasn't given.
 Since the remaining violations are the model's, not the pipeline's,
 :func:`validate_commentary` checks every real response before it's
 persisted, and :func:`generate_fund_commentary` retries once — with the
@@ -99,11 +105,16 @@ _PARAGRAPH_SPLIT_RE = re.compile(r"\n\s*\n")
 #: more, verbatim, after a v2 smoke test on claude-sonnet-4-6 still wrote
 #: "yardstick" (the internal comparator label) and "year-to-date" for a
 #: closed calendar year — both rules now also gate at runtime
-#: (:func:`validate_commentary`). v4 (vs v3) adds one more: the v3 smoke test
-#: was clean on every named rule but still, once, quoted a raw fraction
-#: (0.0113) instead of a percentage — this rule closes that, and the payload
-#: change in :func:`build_user_payload` (dropping ``benchmark.stated``/
-#: ``tier``) removes the mislabelling class those two fields made possible.
+#: (:func:`validate_commentary`). v4 (vs v3) adds two more, still under the
+#: same version — nothing built on v3's prompt text had shipped to a real
+#: user yet, so amending it in place avoids version-churn for no observed
+#: difference: the raw-fraction rule (the v3 smoke test was clean on every
+#: named rule but still, once, quoted 0.0113 instead of a percentage), and
+#: the summary-points rule (paired with the payload diet in
+#: :func:`commentary_payload`, which stopped sending full rolling/rank-
+#: history series). The stated-benchmark/tier payload fields were dropped
+#: the same round, removing the benchmark/category-median mislabelling
+#: class those two fields made possible.
 COMMENTARY_V4_SYSTEM_PROMPT = """You are writing a short factual commentary for a mutual fund
 analytics page. You will receive a JSON object containing computed
 metrics for one fund and its category context.
@@ -140,6 +151,9 @@ Rules — absolute:
 - Quote figures at no more than two decimal places. Express returns,
   volatility, tracking error and drawdown at percentage scale with
   the % symbol; never as raw fractions.
+- Rolling and rank-history data is supplied as summary points
+  (first, last, minimum, maximum). Describe movement using only
+  those points.
 - British English. 100-150 words, two paragraphs.
 
 Structure:
@@ -176,29 +190,77 @@ CORRECTION_MESSAGE_TEMPLATE = (
 )
 
 
-def build_user_payload(fund: Mapping[str, Any], universe: Mapping[str, Any]) -> dict[str, Any]:
-    """The fund's artifact entry (metrics, calendar_years, ranks) plus
-    universe aggregates — verbatim, nothing recomputed (``spec-flexicap-page
-    §5``). The stated benchmark and its tier (``fund.benchmark.stated`` /
-    ``.tier``) are page furniture for the tier-fallback footnote, not
-    commentary material — they are never sent to the model, which removes
-    the benchmark/stated conflation class entirely rather than relying on a
-    prompt rule to suppress it. The only comparator identity the model
-    receives is the category benchmark's display name, under the single
-    flat field ``category_benchmark`` (e.g. "Nifty 500 TRI") — the same
-    name F2 renders on the page (:func:`.render.presentation.benchmark_display_name`),
+def _summary_points(
+    points: list[dict[str, Any]], value_key: str
+) -> dict[str, dict[str, Any]] | None:
+    """First, last, minimum-value, and maximum-value points from a
+    chronological date/value series — four points, never the full series
+    (§5: a real batch run showed ~35-40k input tokens per call, because the
+    full artifact entry carries complete rolling panels and rank histories).
+    ``None`` for an empty series (never fabricated).
+    """
+    if not points:
+        return None
+    return {
+        "first": points[0],
+        "last": points[-1],
+        "min": min(points, key=lambda p: p[value_key]),
+        "max": max(points, key=lambda p: p[value_key]),
+    }
+
+
+def commentary_payload(fund: Mapping[str, Any], universe: Mapping[str, Any]) -> dict[str, Any]:
+    """The diet payload actually sent to the model (``spec-flexicap-page
+    §5``) — nothing recomputed, only reduced.
+
+    The stated benchmark and its tier (``fund.benchmark.stated`` / ``.tier``)
+    are page furniture for the tier-fallback footnote, not commentary
+    material — they are never sent to the model, which removes the
+    benchmark/category-median conflation class entirely rather than relying
+    on a prompt rule to suppress it. The only comparator identity the model
+    receives is the category benchmark's display name, under the single flat
+    field ``category_benchmark`` (e.g. "Nifty 500 TRI") — the same name F2
+    renders on the page (:func:`.render.presentation.benchmark_display_name`),
     so the commentary and the page it sits on never disagree about what the
     comparator is called.
+
+    Rolling panels and rank histories are each reduced to four summary
+    points (:func:`_summary_points`) — a panel with no points is omitted
+    entirely, never an empty/fabricated entry. ``ranks`` carries only the
+    latest percentile per metric-window; the full rank history moves to
+    ``rank_history_summary``. ``universe`` carries only ``count`` and
+    ``aggregates`` — ``category``/``yardstick`` add nothing the model needs
+    once ``category_benchmark`` already names the comparator.
     """
+    rank_history_summary: dict[str, dict[str, Any]] = {}
+    ranks_latest: dict[str, Any] = {}
+    for key, entry in fund["ranks"].items():
+        ranks_latest[key] = entry.get("pct")
+        history = entry.get("history") or []
+        points = [{"date": p["date"], "pct": p["pct"]} for p in history]
+        summary = _summary_points(points, "pct")
+        if summary is not None:
+            rank_history_summary[key] = summary
+
+    rolling_summary: dict[str, dict[str, Any]] = {}
+    for panel_name, points in fund.get("rolling", {}).items():
+        shaped = [{"date": p["date"], "value": p["value"]} for p in points]
+        summary = _summary_points(shaped, "value")
+        if summary is not None:
+            rolling_summary[panel_name] = summary
+
     return {
-        "amfi_code": fund["amfi_code"],
-        "scheme_name": fund["scheme_name"],
-        "fund_house": fund["fund_house"],
+        "fund": {"name": fund["scheme_name"], "fund_house": fund["fund_house"]},
         "category_benchmark": benchmark_display_name(fund["benchmark"]["yardstick"]),
         "metrics": fund["metrics"],
         "calendar_years": fund["calendar_years"],
-        "ranks": fund["ranks"],
-        "universe_aggregates": universe.get("aggregates", {}),
+        "ranks": ranks_latest,
+        "rank_history_summary": rank_history_summary,
+        "rolling_summary": rolling_summary,
+        "universe": {
+            "count": universe.get("count"),
+            "aggregates": universe.get("aggregates", {}),
+        },
     }
 
 
@@ -386,7 +448,7 @@ def generate_fund_commentary(
     """
     amfi_code = fund.get("amfi_code")
     user_message = json.dumps(
-        build_user_payload(fund, universe), allow_nan=False, sort_keys=True
+        commentary_payload(fund, universe), allow_nan=False, sort_keys=True
     )
     messages: list[dict[str, str]] = [{"role": "user", "content": user_message}]
     attempts = max_retries + 1

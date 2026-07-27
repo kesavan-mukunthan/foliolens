@@ -27,7 +27,7 @@ from foliolens.report.flexipage.commentary import (
     CommentarySummary,
     CommentaryTransport,
     COMMENTARY_V4_SYSTEM_PROMPT,
-    build_user_payload,
+    commentary_payload,
     generate_fund_commentary,
     run,
     validate_commentary,
@@ -66,6 +66,29 @@ def test_banned_vocabulary_includes_v3_additions() -> None:
 # ---------------------------------------------------------------------------
 
 
+#: A 6-point rank-history series -- long enough that the diet's 4-point
+#: reduction (first, last, min, max) is a genuine compression, not a no-op.
+#: The last point's pct matches the fixture's own "latest" pct (12.5) below.
+_RETURN_3Y_RANK_HISTORY = [
+    {"date": "2025-01-31", "pct": 20.0},
+    {"date": "2025-02-28", "pct": 18.0},
+    {"date": "2025-03-31", "pct": 25.0},  # max
+    {"date": "2025-04-30", "pct": 15.0},
+    {"date": "2025-05-31", "pct": 10.0},  # min
+    {"date": "2025-06-30", "pct": 12.5},  # last
+]
+
+#: Same shape, for a rolling (non-percentile) panel.
+_ROLLING_RETURN_3Y = [
+    {"date": "2025-01-31", "value": 0.10},
+    {"date": "2025-02-28", "value": 0.11},
+    {"date": "2025-03-31", "value": 0.09},
+    {"date": "2025-04-30", "value": 0.13},  # max
+    {"date": "2025-05-31", "value": 0.08},  # min
+    {"date": "2025-06-30", "value": 0.12},  # last
+]
+
+
 def _fund(amfi_code: str = "AAAA01") -> dict[str, Any]:
     return {
         "amfi_code": amfi_code,
@@ -81,8 +104,11 @@ def _fund(amfi_code: str = "AAAA01") -> dict[str, Any]:
         },
         "calendar_years": {"2023": 0.18, "2024": 0.09, "2025": 0.05},
         "alpha": {},
-        "rolling": {},
-        "ranks": {"return_3Y": {"pct": 12.5, "history": []}},
+        "rolling": {"rolling_return_3Y": list(_ROLLING_RETURN_3Y)},
+        "ranks": {
+            "return_3Y": {"pct": 12.5, "history": list(_RETURN_3Y_RANK_HISTORY)},
+            "return_1Y": {"pct": None, "history": []},
+        },
         "commentary": None,
     }
 
@@ -97,7 +123,7 @@ def _universe() -> dict[str, Any]:
 
 
 def _source_json() -> str:
-    return json.dumps(build_user_payload(_fund(), _universe()), sort_keys=True)
+    return json.dumps(commentary_payload(_fund(), _universe()), sort_keys=True)
 
 
 # A clean, two-paragraph, in-range sample built only from the fixture's own
@@ -172,12 +198,12 @@ def test_validate_commentary_flags_every_banned_term(term: str) -> None:
     assert any("banned vocabulary" in v and term in v for v in violations)
 
 
-def test_build_user_payload_drops_stated_and_tier_uses_category_benchmark() -> None:
+def test_commentary_payload_drops_stated_and_tier_uses_category_benchmark() -> None:
     """v4: the stated benchmark and its tier are page furniture, never
     commentary material -- the only comparator identity sent to the model
     is the category yardstick's display name, under one flat field.
     """
-    payload = build_user_payload(_fund(), _universe())
+    payload = commentary_payload(_fund(), _universe())
     assert "benchmark" not in payload
     assert payload["category_benchmark"] == "Nifty 500 TRI"
 
@@ -185,6 +211,76 @@ def test_build_user_payload_drops_stated_and_tier_uses_category_benchmark() -> N
     assert "stated" not in payload_json
     assert "tier1" not in payload_json
     assert "NIFTY500TRI" not in payload_json  # the raw code never leaks either
+
+
+def test_commentary_payload_fund_block_has_only_name_and_fund_house() -> None:
+    payload = commentary_payload(_fund(), _universe())
+    assert payload["fund"] == {
+        "name": "Alpha Flexi Cap Fund - Direct Plan - Growth",
+        "fund_house": "Alpha Mutual Fund",
+    }
+    payload_json = json.dumps(payload, sort_keys=True)
+    assert "amfi_code" not in payload_json
+    assert "AAAA01" not in payload_json
+    assert '"scheme_name"' not in payload_json
+
+
+def test_commentary_payload_ranks_are_latest_percentile_only() -> None:
+    payload = commentary_payload(_fund(), _universe())
+    assert payload["ranks"] == {"return_3Y": 12.5, "return_1Y": None}
+    # No per-window "pct"/"history" nesting survives the diet.
+    assert isinstance(payload["ranks"]["return_3Y"], float)
+
+
+def test_commentary_payload_rank_history_summary_is_four_points() -> None:
+    payload = commentary_payload(_fund(), _universe())
+    summary = payload["rank_history_summary"]["return_3Y"]
+    assert set(summary.keys()) == {"first", "last", "min", "max"}
+    assert summary["first"] == {"date": "2025-01-31", "pct": 20.0}
+    assert summary["last"] == {"date": "2025-06-30", "pct": 12.5}
+    assert summary["min"] == {"date": "2025-05-31", "pct": 10.0}
+    assert summary["max"] == {"date": "2025-03-31", "pct": 25.0}
+    # The metric-window with an empty history is omitted entirely, never a
+    # fabricated/empty entry.
+    assert "return_1Y" not in payload["rank_history_summary"]
+
+
+def test_commentary_payload_rolling_summary_is_four_points() -> None:
+    payload = commentary_payload(_fund(), _universe())
+    summary = payload["rolling_summary"]["rolling_return_3Y"]
+    assert set(summary.keys()) == {"first", "last", "min", "max"}
+    assert summary["first"] == {"date": "2025-01-31", "value": 0.10}
+    assert summary["last"] == {"date": "2025-06-30", "value": 0.12}
+    assert summary["min"] == {"date": "2025-05-31", "value": 0.08}
+    assert summary["max"] == {"date": "2025-04-30", "value": 0.13}
+
+
+def test_commentary_payload_universe_is_count_and_aggregates_only() -> None:
+    payload = commentary_payload(_fund(), _universe())
+    assert set(payload["universe"].keys()) == {"count", "aggregates"}
+    assert payload["universe"]["count"] == 10
+    payload_json = json.dumps(payload, sort_keys=True)
+    assert "flexi_cap" not in payload_json  # universe.category never sent
+
+
+def _max_list_length(node: Any) -> int:
+    if isinstance(node, list):
+        return max([len(node)] + [_max_list_length(v) for v in node], default=len(node))
+    if isinstance(node, dict):
+        return max([0] + [_max_list_length(v) for v in node.values()])
+    return 0
+
+
+def test_commentary_payload_size_is_bounded() -> None:
+    """No list longer than 4 elements, and the whole payload serialises
+    well under a rough chars/4 -> ~4,000-token proxy (§7-F4) -- the fix for
+    a real batch run that cost ~35-40k input tokens per call because the
+    full artifact entry carries complete rolling panels and rank histories.
+    """
+    payload = commentary_payload(_fund(), _universe())
+    assert _max_list_length(payload) <= 4
+    serialised = json.dumps(payload, sort_keys=True)
+    assert len(serialised) < 16_000
 
 
 def test_validate_commentary_yardstick_still_banned_though_absent_from_payload() -> None:
@@ -212,7 +308,7 @@ def test_validate_commentary_percent_of_json_fraction_passes() -> None:
     """
     fund = _fund()
     fund["metrics"]["return_1Y"] = 0.0218
-    input_json = json.dumps(build_user_payload(fund, _universe()), sort_keys=True)
+    input_json = json.dumps(commentary_payload(fund, _universe()), sort_keys=True)
     assert "2.18" not in input_json  # confirms this exercises the scale match
 
     text = (
@@ -234,7 +330,7 @@ def test_validate_commentary_genuinely_absent_value_fails_at_both_scales() -> No
     """
     fund = _fund()
     fund["metrics"]["return_1Y"] = 0.1318
-    input_json = json.dumps(build_user_payload(fund, _universe()), sort_keys=True)
+    input_json = json.dumps(commentary_payload(fund, _universe()), sort_keys=True)
     text = _CLEAN_TEXT.replace("15%", "14.7%")
     violations = validate_commentary(text, input_json)
     assert any("numbers not in input JSON" in v and "14.7" in v for v in violations)
@@ -260,7 +356,7 @@ def test_generate_fund_commentary_success_when_clean() -> None:
         assert system == COMMENTARY_V4_SYSTEM_PROMPT
         assert len(messages) == 1
         assert messages[0]["role"] == "user"
-        assert "AAAA01" in messages[0]["content"]
+        assert "Alpha Flexi Cap Fund" in messages[0]["content"]
         return _CLEAN_TEXT
 
     result = generate_fund_commentary(_fund(), _universe(), stub)
