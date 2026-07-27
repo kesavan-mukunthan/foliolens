@@ -107,10 +107,12 @@ def test_intra_month_trough_captured_daily_not_month_end() -> None:
     assert daily.peak_date == date(2024, 1, 31)
     assert daily.recovery_date is not None
 
-    # The month-end series (Jan-31, Feb-29) is monotone up → zero drawdown: the
-    # intra-month trough is invisible to it. This is exactly why §3 reads daily.
-    month_end_dd = max_drawdown(to_returns(sc.source.nav.month_end(), frequency=Frequency.MONTHLY))
-    assert month_end_dd == 0.0
+    # max_drawdown is fixed to the daily convention (spec-analytics): a
+    # month-end series is rejected outright rather than silently smoothing
+    # away the intra-month trough into a misleading zero drawdown.
+    month_end_series = to_returns(sc.source.nav.month_end(), frequency=Frequency.MONTHLY)
+    with pytest.raises(ValueError, match="frequency"):
+        max_drawdown(month_end_series)
     assert daily.max_drawdown < -0.15
 
 

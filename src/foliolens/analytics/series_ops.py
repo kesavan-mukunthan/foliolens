@@ -15,6 +15,19 @@ import numpy.typing as npt
 
 from foliolens.model.value_objects import ReturnSeries
 
+from ..returns.frequency import Frequency
+
+
+def require_frequency(rs: ReturnSeries, expected: Frequency) -> None:
+    """Raise ValueError if ``rs.frequency`` != ``expected``.
+
+    ``spec-analytics``: no cross-frequency series use — a metric that fixes a
+    convention (an annualisation factor, a daily-NAV basis) must reject a
+    series declaring the wrong one rather than silently misapplying it.
+    """
+    if rs.frequency != expected:
+        raise ValueError(f"frequency mismatch: expected {expected}, got {rs.frequency}")
+
 
 def align_dated(
     a: ReturnSeries, b: ReturnSeries
