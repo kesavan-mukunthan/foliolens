@@ -106,6 +106,23 @@ def max_drawdown(rs: ReturnSeries) -> float:
     return float(np.min((levels - running_max) / running_max))
 
 
+def underwater(idx: ValueIndex) -> ReturnSeries:
+    """Drawdown-from-peak at every date of ``idx`` (fraction ≤ 0): the running
+    decline from the peak-to-date level.
+
+    The same running-max computation :func:`drawdown` uses internally to
+    locate its deepest episode, exposed here as the full curve rather than
+    reduced to the single trough — the seam a chart wanting the curve itself
+    (not just the episode) reads from. Periodicity-agnostic, like
+    :func:`drawdown`: the caller's ``idx`` may be daily or month-end.
+    """
+    if len(idx) < 1:
+        raise ValueError("underwater needs >= 1 level")
+    running_max = np.fmax.accumulate(idx.levels)
+    dd = (idx.levels - running_max) / running_max
+    return ReturnSeries(dates=idx.dates, values=dd)
+
+
 def drawdown(idx: ValueIndex) -> Drawdown:
     """Deepest drawdown episode of a dated float level series, with its timing.
 
@@ -120,8 +137,7 @@ def drawdown(idx: ValueIndex) -> Drawdown:
         raise ValueError("drawdown needs >= 1 level")
     levels = idx.levels
     dates = idx.dates
-    running_max = np.fmax.accumulate(levels)
-    dd = (levels - running_max) / running_max
+    dd = underwater(idx).values
     trough_i = int(np.argmin(dd))
     max_dd = float(dd[trough_i])
     # The peak that leads into this trough: the highest level on or before it

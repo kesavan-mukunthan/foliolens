@@ -265,6 +265,52 @@ def test_mature_funds_have_full_5y_panel(artifact: dict[str, Any]) -> None:
 
 
 # ---------------------------------------------------------------------------
+# Chart-only ``series`` block (spec-flexicap-page §4): growth-of-10k +
+# underwater — month-end grain, visual-grade float, never a figure of record.
+# ---------------------------------------------------------------------------
+
+
+def test_growth_of_10k_present_with_matched_fund_and_yardstick_lengths(
+    artifact: dict[str, Any],
+) -> None:
+    for code in ("AAAA01", "BBBB02", "CCCC03"):
+        f = _fund(artifact, code)
+        block = f["series"]["growth_10k"]
+        assert block is not None
+        assert len(block["fund"]) >= 1
+        assert len(block["fund"]) == len(block["yardstick"])
+        assert [p["date"] for p in block["fund"]] == [p["date"] for p in block["yardstick"]]
+        # Both legs rebase off the same ₹10,000 anchor before the first
+        # period's return is applied — a genuine side-by-side, not two
+        # independently-based curves.
+        for point in (*block["fund"], *block["yardstick"]):
+            assert point["value"] > 0.0
+
+
+def test_underwater_series_present_and_non_positive(artifact: dict[str, Any]) -> None:
+    for code in ("AAAA01", "BBBB02", "CCCC03"):
+        f = _fund(artifact, code)
+        underwater = f["series"]["underwater"]
+        assert len(underwater) >= 1
+        assert all(point["value"] <= 0.0 for point in underwater)
+
+
+def test_rolling_sharpe_rank_history_present_for_mature_funds(
+    artifact: dict[str, Any],
+) -> None:
+    for code in ("AAAA01", "BBBB02"):
+        f = _fund(artifact, code)
+        assert len(f["ranks"]["sharpe_3Y"]["history"]) >= 1
+
+
+def test_rolling_sharpe_rank_history_empty_for_young_fund(
+    artifact: dict[str, Any],
+) -> None:
+    gamma = _fund(artifact, "CCCC03")
+    assert gamma["ranks"]["sharpe_3Y"]["history"] == []
+
+
+# ---------------------------------------------------------------------------
 # Ranks form a valid permutation over non-null funds (§7)
 # ---------------------------------------------------------------------------
 

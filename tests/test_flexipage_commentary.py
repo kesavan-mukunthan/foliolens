@@ -105,6 +105,22 @@ def _fund(amfi_code: str = "AAAA01") -> dict[str, Any]:
         "calendar_years": {"2023": 0.18, "2024": 0.09, "2025": 0.05},
         "alpha": {},
         "rolling": {"rolling_return_3Y": list(_ROLLING_RETURN_3Y)},
+        "series": {
+            "growth_10k": {
+                "fund": [
+                    {"date": "2025-01-31", "value": 10_000.0},
+                    {"date": "2025-06-30", "value": 11_234.56},
+                ],
+                "yardstick": [
+                    {"date": "2025-01-31", "value": 10_000.0},
+                    {"date": "2025-06-30", "value": 10_876.54},
+                ],
+            },
+            "underwater": [
+                {"date": "2025-01-31", "value": 0.0},
+                {"date": "2025-06-30", "value": -0.0987},
+            ],
+        },
         "ranks": {
             "return_3Y": {"pct": 12.5, "history": list(_RETURN_3Y_RANK_HISTORY)},
             "return_1Y": {"pct": None, "history": []},
@@ -253,6 +269,21 @@ def test_commentary_payload_rolling_summary_is_four_points() -> None:
     assert summary["last"] == {"date": "2025-06-30", "value": 0.12}
     assert summary["min"] == {"date": "2025-05-31", "value": 0.08}
     assert summary["max"] == {"date": "2025-04-30", "value": 0.13}
+
+
+def test_commentary_payload_excludes_chart_only_series_block() -> None:
+    """``series`` (growth-of-10k, underwater — spec-flexicap-page §4) is a
+    chart-only sibling of ``rolling``: visual-grade float, never commentary
+    material. ``commentary_payload`` selects fields explicitly and never
+    reads ``fund["series"]`` at all, so none of it reaches the model.
+    """
+    payload = commentary_payload(_fund(), _universe())
+    assert "series" not in payload
+    payload_json = json.dumps(payload, sort_keys=True)
+    assert "growth_10k" not in payload_json
+    assert "underwater" not in payload_json
+    assert "11234.56" not in payload_json
+    assert "10876.54" not in payload_json
 
 
 def test_commentary_payload_universe_is_count_and_aggregates_only() -> None:

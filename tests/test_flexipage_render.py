@@ -291,13 +291,69 @@ def test_page_count_and_size_reported(site: RenderSummary, metrics_path: Path) -
     assert site.total_size_bytes > 0
 
 
-def test_young_fund_charts_skip_cleanly(site: RenderSummary) -> None:
-    """CCCC03 (~8 months old) has no 3Y-anchored series — every chart skips,
-    never an empty axes frame (``spec-flexicap-page §7-F2``).
+def test_young_fund_3y_anchored_charts_skip_cleanly(site: RenderSummary) -> None:
+    """CCCC03 (~8 months old) has no 3Y-anchored series, so the rolling
+    excess-return and rolling-Sharpe-rank charts skip — never a padded or
+    partial window (``spec-flexicap-page §7-F2``). Growth-of-10k and
+    underwater need no fixed window, so they render off the fund's short
+    available history: partial-history skip is per-chart, not all-or-nothing.
     """
     html = (site.out_dir / "funds" / "CCCC03.html").read_text(encoding="utf-8")
+    assert html.count("<svg") == 2
+    assert "No charts available" not in html
+
+
+def test_full_history_fund_renders_all_four_charts(site: RenderSummary) -> None:
+    for code in ("AAAA01", "BBBB02"):
+        html = (site.out_dir / "funds" / f"{code}.html").read_text(encoding="utf-8")
+        assert html.count("<svg") == 4
+
+
+def test_growth_of_10k_chart_labels_yardstick_nifty500tri(site: RenderSummary) -> None:
+    html = (site.out_dir / "funds" / "AAAA01.html").read_text(encoding="utf-8")
+    assert "Nifty 500 TRI" in html
+
+
+def test_underwater_chart_annotated_month_end_basis(site: RenderSummary) -> None:
+    html = (site.out_dir / "funds" / "AAAA01.html").read_text(encoding="utf-8")
+    assert "month-end basis" in html
+
+
+def test_no_fund_has_all_four_charts_skipped(site: RenderSummary) -> None:
+    """Every successfully-loaded fund reaches ``build_fund_panel`` with a
+    non-empty ``fund.returns`` (``to_returns`` would already have raised
+    otherwise), so growth-of-10k and underwater always have at least one
+    point: no loaded fund can land in ``funds_with_all_charts_skipped``.
+    """
+    assert site.funds_with_all_charts_skipped == ()
+
+
+def test_no_series_data_shows_no_charts_available(tmp_path: Path) -> None:
+    """A hand-built artifact with no ``series``/``rolling``/``ranks`` data
+    (e.g. an older, pre-``series`` artifact) still hits the template's
+    all-skipped fallback cleanly — the branch stays exercised even though no
+    successfully-loaded real fund can reach it (see the test above).
+    """
+    fund = _minimal_fund("NOSERIES01", 0.01, 0.01, 0.01)
+    artifact = {
+        "schema_version": "flexipage-1",
+        "as_of": "2026-07-14",
+        "universe": {
+            "category": "flexi_cap",
+            "count": 1,
+            "yardstick": "NIFTY500TRI",
+            "aggregates": {},
+        },
+        "funds": [fund],
+    }
+    metrics_path = tmp_path / "metrics.json"
+    metrics_path.write_text(json.dumps(artifact))
+    summary = render_site(metrics_path, tmp_path / "site")
+
+    html = (summary.out_dir / "funds" / "NOSERIES01.html").read_text(encoding="utf-8")
     assert "<svg" not in html
     assert "No charts available" in html
+    assert summary.funds_with_all_charts_skipped == ("NOSERIES01",)
 
 
 # ---------------------------------------------------------------------------

@@ -44,7 +44,7 @@ import numpy.typing as npt
 
 from foliolens.model.value_objects import ReturnSeries
 
-from .metrics import volatility
+from .metrics import sharpe, volatility
 from .rolling import rolling_return
 from .series_ops import align, align_dated
 
@@ -400,6 +400,17 @@ def rolling_correlation(
 ) -> ReturnSeries:
     """Rolling :func:`correlation`, monthly step, over a fixed window."""
     return _rolling_pair(fund, benchmark, window_months, correlation)
+
+
+def rolling_sharpe(fund: ReturnSeries, rf: ReturnSeries, window_months: int) -> ReturnSeries:
+    """Rolling :func:`~.metrics.sharpe`, monthly step, over a fixed window.
+
+    ``rf`` plays the second series in :func:`_rolling_pair` — the same
+    two-series windower ``rolling_beta``/``rolling_correlation`` use, ``fn``
+    being the only thing that differs (an rf *series*, never a scalar rate,
+    per ``CLAUDE.md``).
+    """
+    return _rolling_pair(fund, rf, window_months, sharpe)
 
 
 def rolling_betas(
