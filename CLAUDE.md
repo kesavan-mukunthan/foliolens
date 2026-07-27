@@ -63,3 +63,18 @@ Numeric layers gate on tests; narrative layers gate on the equivalent. Pipeline 
 
 ## Protocol
 - `ReturnSource` supplies `value_series` + `cashflows` **only**. Returns are produced by the `period_return` free function. **Risk/analytics are free functions over `ReturnSeries`, not methods on `ReturnSource` or any data class** — mirroring the engine. The earlier "risk metrics are protocol surface" rule is **withdrawn** (see `specs/spec-analytics.md` §0): no `sharpe`/`max_drawdown`/`volatility` on the protocol or the concrete sources.
+
+## Filesystem discipline (all sessions)
+- Never `rm -rf` outside the repo working tree. For repo-internal
+  cleanup, prefer `git clean` (dry-run first: `git clean -n`).
+- Before any deletion, list what will be removed and say so in the
+  transcript. If clearing build outputs, move them to a `.trash/`
+  sibling directory instead of deleting; the user empties it.
+- Build CLIs (runner, render, land) overwrite their own outputs —
+  pre-deleting their target directories is never required.
+- Backup files (`*.bak`) are user-owned state: never delete them,
+  even when they appear stale.
+- `~/foliolens-data/` is the canonical data root (resolved via
+  `FOLIOLENS_DATA_DIR`). Treat everything under it as
+  irreplaceable-by-default: some contents (manually downloaded
+  source CSVs) cost real effort to reacquire.
