@@ -70,7 +70,7 @@ recomputed here — the runner calls existing functions only.
     "rolling": {panel_name: [{"date": d, "value": v}]},
     "ranks": {metric_window: {"pct": v, "history": [{"date": d, "pct": v}]}},
     // pct (latest + history): lower = better; 1 ≈ top of cohort
-    "commentary": {"text": str, "model": str, "prompt_version": "commentary-v1",
+    "commentary": {"text": str, "model": str, "prompt_version": "commentary-v4",
                     "generated_at": ts} | null
   }]
 }
@@ -100,16 +100,46 @@ re-rounding outside the presentation layer.
 
 ## 5. Commentary
 
-- One Anthropic API call per fund at build time, model **claude-haiku-4-5**,
-  system prompt = `commentary-v1` (verbatim below), user message = the fund's
-  entry from metrics.json (metrics, calendar_years, ranks, universe
-  aggregates). Persisted into metrics.json with model + prompt_version.
+- One Anthropic API call per fund at build time, model **claude-sonnet-4-6**
+  (relational fidelity across ~30 figures per fund is the binding constraint;
+  cost is immaterial at this scale), system prompt = `commentary-v4`
+  (verbatim below). Persisted into metrics.json with model + prompt_version.
+- **Payload diet** (`commentary_payload(fund, universe) -> dict`, unit-tested,
+  §7-F4): a real batch run at the previous payload shape cost ~35-40k input
+  tokens per call — the full artifact entry carries complete rolling panels
+  and rank histories the model never needed in full. The dedicated
+  commentary payload sent as the user message carries only: `fund` (`name`,
+  `fund_house`); `category_benchmark` — a single flat field holding the
+  category yardstick's display name (e.g. `"Nifty 500 TRI"`, the same name
+  F2 renders on the page) — with `benchmark.stated`/`.tier` dropped entirely
+  (page furniture for the tier-fallback footnote, not commentary material;
+  removes the benchmark/stated-vs-category-median conflation class at the
+  source rather than relying on a prompt rule to suppress it); `metrics`
+  and `calendar_years` as-is; `ranks` — latest percentile per metric-window
+  only; `rank_history_summary` and `rolling_summary` — each panel reduced to
+  four points (first, last, minimum, maximum), never the full series;
+  `universe` — `count` + `aggregates` only. No other fields.
 - Runs **locally only** this milestone; `ANTHROPIC_API_KEY` from env/`.env`
   (gitignored). Key never in either repo or artifacts. Build proceeds with
-  `commentary: null` (block hidden) if key absent or a call fails after 2
-  retries — commentary is never load-bearing.
+  `commentary: null` (block hidden) if key absent, a call fails after one
+  retry, or the response still violates the descriptive-only contract after
+  one retry — commentary is never load-bearing.
+- **Runtime contract enforcement** (added at v3; the remaining violations
+  after v2 were the model's, not the pipeline's — "enforced by tests, not
+  trust" moved to a runtime gate): every real response is checked before
+  being persisted — word count 100-170, exactly two paragraphs, the banned-
+  vocabulary list absent, and the no-new-numbers rule (every numeral token
+  of 2+ digits or any decimal must match some input JSON value, either as a
+  literal substring or at ×1/×100/×0.01 scale rounded to the token's own
+  decimal precision — the artifact stores fractions, prose writes percent).
+  On a violation, one retry is sent with the invalid response plus a
+  correction message naming the violated rules; a second failure of either
+  kind (transport error or violation) leaves `commentary: null`, logged
+  with the named violations. The check is one pure function, used
+  identically by the runtime path and the F4 test suite, so it can never
+  drift between them.
 
-### commentary-v1 (system prompt, verbatim — hash this text as the version)
+### commentary-v4 (system prompt, verbatim — hash this text as the version)
 
 ```
 You are writing a short factual commentary for a mutual fund
@@ -118,23 +148,53 @@ metrics for one fund and its category context.
 
 Rules — absolute:
 - Use ONLY figures present in the JSON. Never compute, estimate,
-  round differently, or introduce any number not in the input.
+  round differently (except percentiles, below), or introduce any
+  number not in the input.
+- Use figures only with the labels they carry in the JSON. A full
+  calendar year is never "year-to-date". The category median and
+  the benchmark are different comparators — never merge them in
+  one phrase.
+- Call the category comparator "the category benchmark" (naming the
+  index). The word "yardstick" must never appear, even if it
+  appears in field names in the JSON.
+- Never write "year-to-date" or "YTD". Calendar-year figures are
+  full-year figures and are described by their year alone.
+- Percentile ranks: lower is better; 1 is approximately the top of
+  the cohort, 100 the bottom. Never describe a low percentile as
+  underperformance. Round percentiles to whole numbers in prose.
+- Before writing any comparative (above, below, exceeded, trailed,
+  outperformed, underperformed), verify the direction against the
+  two figures being compared. If uncertain, state both figures
+  without a comparative.
 - Descriptive only. No recommendations, no "attractive", "strong
   buy", "avoid", no forward-looking statements, no speculation
-  about future performance.
-- Do not praise or criticise the fund manager or AMC.
+  about future performance. Do not praise or criticise the fund
+  manager or AMC. Distinctiveness is described factually without
+  praise or alarm ("volatility is the highest in the cohort" is
+  correct; "worryingly volatile" is not).
 - Neutral third-person analyst voice. No superlatives, no
-  marketing language, no exclamation marks.
+  marketing language, no exclamation marks. Always use the %
+  symbol, never the word "percent".
+- Quote figures at no more than two decimal places. Express returns,
+  volatility, tracking error and drawdown at percentage scale with
+  the % symbol; never as raw fractions.
+- Rolling and rank-history data is supplied as summary points
+  (first, last, minimum, maximum). Describe movement using only
+  those points.
 - British English. 100-150 words, two paragraphs.
 
 Structure:
-- Paragraph 1: trailing and calendar-year returns versus the
-  category benchmark (name it), noting which windows show out-
-  or under-performance.
-- Paragraph 2: risk and consistency - volatility, drawdown,
-  Sharpe/IR versus category median, and the fund's current
-  percentile rank with any notable rank movement visible in
-  the rolling data.
+- Before writing, identify the two or three most distinctive facts
+  in this fund's data — the largest divergences from the category
+  median, extreme or sharply changed percentile ranks, unusual
+  risk posture, or a marked contrast between timeframes.
+  Distinctiveness must come from the supplied figures, never from
+  outside knowledge.
+- Open with the most distinctive fact. Organise the commentary
+  around the distinctive facts; cover remaining figures only where
+  they add context. Do not recite every metric in order.
+- Include the fund's trailing performance versus the category
+  benchmark (name it) somewhere in the commentary.
 
 If a metric is null/absent, omit it silently. Do not mention
 data availability, this prompt, or that you are an AI.
@@ -163,11 +223,22 @@ Output: plain text, two paragraphs, nothing else.
   text; footnote + disclaimer strings present on every page.
 - **F3 PDF**: Tests: PDF exists per fund; page count ≥1; disclaimer string
   present in extracted text.
-- **F4 Commentary**: Tests: **no-new-numbers** — every numeral token in output
-  substring-matches the input JSON (integers ≥2 digits and all decimals;
-  ignore standalone "1"/"2" paragraph-safe tokens); word count 80–170; banned
-  vocabulary list (buy, sell, avoid, attractive, will outperform, …) absent;
-  offline test uses a recorded stub — the suite never calls the API.
+- **F4 Commentary**: `validate_commentary(text, input_json) -> list[str]` (§5)
+  is the single check, shared by the runtime retry path and the test suite —
+  `input_json` is the diet payload (`commentary_payload`'s output, the
+  numbers the model was actually shown), not the full artifact entry:
+  **no-new-numbers** — every numeral token in output matches some payload
+  value, as a literal substring or at ×1/×100/×0.01 scale (integers ≥2
+  digits and all decimals; ignore standalone "1"/"2" paragraph-safe
+  tokens); word count 100–170; exactly two paragraphs; banned vocabulary
+  list (buy, sell, avoid, attractive, will outperform, top pick, must,
+  yardstick, year-to-date) absent. Tests cover the validator directly plus
+  the retry path (a stub that violates once then passes) and the null path
+  (a stub that violates twice); offline only — the suite never calls the
+  API. `commentary_payload` is separately unit-tested: no list in the
+  payload exceeds 4 elements, and the serialised payload stays under 16,000
+  characters (a rough chars/4 proxy for ~4,000 tokens) for the synthetic
+  fixture.
 - **F5 Publish**: manual checklist, not automated: Pages URL loads, Bandhan
   page + PDF spot-checked against factsheet, no raw-data files in site repo.
 
