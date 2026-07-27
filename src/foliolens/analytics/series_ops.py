@@ -77,5 +77,6 @@ def between(rs: ReturnSeries, start: date, end: date) -> ReturnSeries:
     return ReturnSeries(
         dates=rs.dates[lo:hi],
         values=rs.values[lo:hi],
+        frequency=rs.frequency,
         base=rs.base,
     )

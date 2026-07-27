@@ -37,6 +37,7 @@ from foliolens.model.investments import Investment
 from foliolens.model.value_objects import ReturnSeries, ValueIndex
 
 from ..returns.convert import to_index, to_returns
+from ..returns.frequency import Frequency
 
 _VAR_CUTOFF = 0.05  # 95% VaR/CVaR — the spec-analytics §3 confidence level
 
@@ -120,7 +121,7 @@ def underwater(idx: ValueIndex) -> ReturnSeries:
         raise ValueError("underwater needs >= 1 level")
     running_max = np.fmax.accumulate(idx.levels)
     dd = (idx.levels - running_max) / running_max
-    return ReturnSeries(dates=idx.dates, values=dd)
+    return ReturnSeries(dates=idx.dates, values=dd, frequency=Frequency.DAILY)
 
 
 def drawdown(idx: ValueIndex) -> Drawdown:
@@ -197,7 +198,7 @@ def _daily_returns(investment: Investment) -> ReturnSeries:
     No month-end resampling: drawdown/VaR/CVaR read the *raw* daily NAV so an
     intra-month trough is captured, not smoothed to a month-end point.
     """
-    return to_returns(investment.source.value_series)
+    return to_returns(investment.source.value_series, frequency=Frequency.DAILY)
 
 
 def _daily_levels(investment: Investment) -> ValueIndex:

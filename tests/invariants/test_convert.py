@@ -17,6 +17,7 @@ import pytest
 
 from foliolens.model.value_objects import NavSeries, ReturnSeries, ValueIndex
 from foliolens.returns.convert import simple_return, to_index, to_returns
+from foliolens.returns.frequency import Frequency
 
 
 def _nav(*rows: tuple[date, Decimal]) -> NavSeries:
@@ -34,7 +35,7 @@ def test_to_returns_known_values() -> None:
         (date(2024, 2, 29), Decimal("110.00")),
         (date(2024, 3, 31), Decimal("99.00")),
     )
-    rs = to_returns(nav)
+    rs = to_returns(nav, frequency=Frequency.MONTHLY)
     assert rs.dates == (date(2024, 2, 29), date(2024, 3, 31))
     assert rs.values.dtype == np.float64
     # 110/100 - 1 = 0.10 ; 99/110 - 1 = -0.10
@@ -51,7 +52,7 @@ def test_simple_return_rejects_nonpositive_start() -> None:
 
 def test_to_returns_requires_two_points() -> None:
     with pytest.raises(ValueError):
-        to_returns(_nav((date(2024, 1, 31), Decimal("100.00"))))
+        to_returns(_nav((date(2024, 1, 31), Decimal("100.00"))), frequency=Frequency.MONTHLY)
 
 
 def test_to_returns_rejects_nonpositive_nav() -> None:
@@ -60,7 +61,8 @@ def test_to_returns_rejects_nonpositive_nav() -> None:
             _nav(
                 (date(2024, 1, 31), Decimal("0.00")),
                 (date(2024, 2, 29), Decimal("110.00")),
-            )
+            ),
+            frequency=Frequency.MONTHLY,
         )
 
 
@@ -71,7 +73,8 @@ def test_to_returns_rejects_nonpositive_final_nav() -> None:
             _nav(
                 (date(2024, 1, 31), Decimal("100.00")),
                 (date(2024, 2, 29), Decimal("0.00")),
-            )
+            ),
+            frequency=Frequency.MONTHLY,
         )
 
 
@@ -87,7 +90,7 @@ def test_roundtrip_reproduces_ratios_not_levels() -> None:
         (date(2024, 3, 31), Decimal("128.20")),
         (date(2024, 4, 30), Decimal("140.75")),
     )
-    idx = to_index(to_returns(nav))
+    idx = to_index(to_returns(nav, frequency=Frequency.MONTHLY))
 
     nav_values = [float(v) for _, v in nav.data]
     nav_ratios = [b / a for a, b in zip(nav_values, nav_values[1:])]
@@ -96,7 +99,7 @@ def test_roundtrip_reproduces_ratios_not_levels() -> None:
     level_ratios = [b / a for a, b in zip(idx.levels, idx.levels[1:])]
     np.testing.assert_allclose(level_ratios, nav_ratios[1:], rtol=1e-6)
     # And level[0]/base reproduces the first NAV ratio.
-    assert idx.levels[0] / float(to_returns(nav).base) == pytest.approx(
+    assert idx.levels[0] / float(to_returns(nav, frequency=Frequency.MONTHLY).base) == pytest.approx(
         nav_ratios[0], rel=1e-6
     )
 
@@ -104,7 +107,7 @@ def test_roundtrip_reproduces_ratios_not_levels() -> None:
     assert idx.levels[0] != pytest.approx(nav_values[1])
     # First level = 100 * (1 + first return) = 100 * (130/123.45)
     assert idx.levels[0] == pytest.approx(100.0 * (130.00 / 123.45), rel=1e-9)
-    assert idx.dates == to_returns(nav).dates
+    assert idx.dates == to_returns(nav, frequency=Frequency.MONTHLY).dates
 
 
 # ---------------------------------------------------------------------------
@@ -117,6 +120,7 @@ def test_return_series_coerces_int_to_float64() -> None:
     rs = ReturnSeries(
         dates=(date(2024, 1, 31), date(2024, 2, 29)),
         values=np.array([1, 2], dtype=np.int64),
+        frequency=Frequency.MONTHLY,
     )
     assert rs.values.dtype == np.float64
 
@@ -127,6 +131,7 @@ def test_return_series_rejects_non_float64_dtype() -> None:
         ReturnSeries(
             dates=(date(2024, 1, 31), date(2024, 2, 29)),
             values=np.array(["a", "b"]),
+            frequency=Frequency.MONTHLY,
         )
 
 
@@ -135,6 +140,7 @@ def test_return_series_rejects_length_mismatch() -> None:
         ReturnSeries(
             dates=(date(2024, 1, 31),),
             values=np.array([0.1, 0.2], dtype=np.float64),
+            frequency=Frequency.MONTHLY,
         )
 
 
@@ -143,6 +149,7 @@ def test_return_series_rejects_unsorted_dates() -> None:
         ReturnSeries(
             dates=(date(2024, 2, 29), date(2024, 1, 31)),
             values=np.array([0.1, 0.2], dtype=np.float64),
+            frequency=Frequency.MONTHLY,
         )
 
 
@@ -150,6 +157,7 @@ def test_return_series_values_are_read_only() -> None:
     rs = ReturnSeries(
         dates=(date(2024, 1, 31),),
         values=np.array([0.1], dtype=np.float64),
+        frequency=Frequency.MONTHLY,
     )
     assert not rs.values.flags.writeable
     assert len(rs) == 1

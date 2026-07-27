@@ -20,6 +20,7 @@ from foliolens.analytics.peer import (
     rank_history,
 )
 from foliolens.model.value_objects import ReturnSeries
+from foliolens.returns.frequency import Frequency
 from fixtures import month_end_dates, returns_series
 
 _ABS = 1e-12
@@ -160,8 +161,10 @@ def _panels() -> dict[str, ReturnSeries]:
         "A": returns_series([0.01, 0.01, 0.01, 0.01, 0.01]),
         "B": returns_series([0.02, 0.02, 0.02, 0.02, 0.02]),
         "C": returns_series([0.03, 0.03, 0.03, 0.03, 0.03]),
-        "D": ReturnSeries(dates=dates5[2:], values=np.array([0.005, 0.04, 0.04])),
-        "E": ReturnSeries(dates=(), values=np.array([], dtype=np.float64)),
+        "D": ReturnSeries(
+            dates=dates5[2:], values=np.array([0.005, 0.04, 0.04]), frequency=Frequency.MONTHLY
+        ),
+        "E": ReturnSeries(dates=(), values=np.array([], dtype=np.float64), frequency=Frequency.MONTHLY),
     }
 
 

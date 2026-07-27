@@ -14,6 +14,8 @@ import numpy as np
 
 from foliolens.model.value_objects import NavSeries, ReturnSeries, ValueIndex
 
+from .frequency import Frequency
+
 
 def simple_return(start: Decimal, end: Decimal) -> float:
     """Single-period simple return ``end/start - 1``, cast once to float.
@@ -25,12 +27,14 @@ def simple_return(start: Decimal, end: Decimal) -> float:
     return float(end / start - 1)
 
 
-def to_returns(nav: NavSeries) -> ReturnSeries:
+def to_returns(nav: NavSeries, *, frequency: Frequency) -> ReturnSeries:
     """Simple returns between consecutive points of ``nav`` as passed.
 
     No resampling happens here. The canonical monthly analytical panel is
-    ``to_returns(nav.month_end())`` — resample first, then convert. Period-end
-    dates are ``nav.data[1:]``; the base anchor is Decimal("100").
+    ``to_returns(nav.month_end(), frequency=Frequency.MONTHLY)`` — resample
+    first, then convert. Period-end dates are ``nav.data[1:]``; the base
+    anchor is Decimal("100"). ``frequency`` is declared explicitly by the
+    caller — never inferred from the dates.
 
     Cast-at-birth: each ratio is computed in Decimal and cast once to float.
     Raises ValueError if fewer than 2 points or any NAV <= 0.
@@ -51,7 +55,7 @@ def to_returns(nav: NavSeries) -> ReturnSeries:
         ],
         dtype=np.float64,
     )
-    return ReturnSeries(dates=dates, values=values, base=Decimal("100"))
+    return ReturnSeries(dates=dates, values=values, frequency=frequency, base=Decimal("100"))
 
 
 def to_index(r: ReturnSeries) -> ValueIndex:

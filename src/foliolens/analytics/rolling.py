@@ -45,7 +45,9 @@ def rolling_return(rs: ReturnSeries, window_months: int) -> ReturnSeries:
         raise ValueError(f"window_months must be >= 1, got {window_months}")
     n = len(rs)
     if n < window_months:
-        return ReturnSeries(dates=(), values=np.array([], dtype=np.float64), base=rs.base)
+        return ReturnSeries(
+            dates=(), values=np.array([], dtype=np.float64), frequency=rs.frequency, base=rs.base
+        )
     dates: list[date] = []
     values: list[float] = []
     for end_i in range(window_months - 1, n):
@@ -54,7 +56,12 @@ def rolling_return(rs: ReturnSeries, window_months: int) -> ReturnSeries:
         annualised = (1.0 + compounded) ** (_MONTHS_PER_YEAR / window_months) - 1.0
         dates.append(rs.dates[end_i])
         values.append(annualised)
-    return ReturnSeries(dates=tuple(dates), values=np.array(values, dtype=np.float64), base=rs.base)
+    return ReturnSeries(
+        dates=tuple(dates),
+        values=np.array(values, dtype=np.float64),
+        frequency=rs.frequency,
+        base=rs.base,
+    )
 
 
 def rolling_returns(rs: ReturnSeries) -> dict[str, ReturnSeries]:

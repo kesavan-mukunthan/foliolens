@@ -19,6 +19,7 @@ from .holdings import Holding
 from .sources import PricedSource, ReturnSource
 from .value_objects import Cashflow, NavSeries, ReturnSeries
 from ..returns.convert import to_returns
+from ..returns.frequency import Frequency
 
 
 class Investment(Protocol):
@@ -71,7 +72,7 @@ class ShareClass:
 
     @cached_property
     def returns(self) -> ReturnSeries:
-        return to_returns(self.source.nav.month_end())
+        return to_returns(self.source.nav.month_end(), frequency=Frequency.MONTHLY)
 
 
 @dataclass(frozen=True)
@@ -180,7 +181,7 @@ class Benchmark:
 
     @cached_property
     def returns(self) -> ReturnSeries:
-        return to_returns(self.source.nav.month_end())
+        return to_returns(self.source.nav.month_end(), frequency=Frequency.MONTHLY)
 
 
 def benchmark_from_index(levels: NavSeries) -> Benchmark:

@@ -33,6 +33,7 @@ import numpy as np
 
 from ..model.investments import SeriesInvestment
 from ..model.value_objects import ReturnSeries
+from ..returns.frequency import Frequency
 
 _MONTH_FORMATS = ("%Y-%m", "%b-%Y", "%b-%y", "%m/%Y", "%Y%m")
 
@@ -116,6 +117,7 @@ def parse_iima_rf(
     return ReturnSeries(
         dates=dates,
         values=np.array([v for _, v in pairs], dtype=np.float64),
+        frequency=Frequency.MONTHLY,
     )
 
 

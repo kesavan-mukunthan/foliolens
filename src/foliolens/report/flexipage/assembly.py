@@ -59,6 +59,7 @@ from foliolens.model.sources import ReturnSource
 from foliolens.model.value_objects import ReturnSeries
 from foliolens.returns.convert import to_index
 from foliolens.returns.engine import period_return
+from foliolens.returns.frequency import Frequency
 
 #: Artifact schema version for this page's durable output (``spec-flexicap-page §3``).
 SCHEMA_VERSION = "flexipage-1"
@@ -142,7 +143,9 @@ def _trailing(rs: ReturnSeries, months: int) -> ReturnSeries | None:
     if len(rs) < months:
         return None
     lo = len(rs) - months
-    return ReturnSeries(dates=rs.dates[lo:], values=rs.values[lo:], base=rs.base)
+    return ReturnSeries(
+        dates=rs.dates[lo:], values=rs.values[lo:], frequency=rs.frequency, base=rs.base
+    )
 
 
 def _engine_return(source: ReturnSource, period: str, as_of: date) -> float | None:
@@ -269,10 +272,17 @@ def _growth_of_10k(
     if not dates:
         return None
     fund_idx = to_index(
-        ReturnSeries(dates=dates, values=fund_vals, base=_GROWTH_OF_10K_BASE)
+        ReturnSeries(
+            dates=dates, values=fund_vals, frequency=fund_rs.frequency, base=_GROWTH_OF_10K_BASE
+        )
     )
     yardstick_idx = to_index(
-        ReturnSeries(dates=dates, values=yardstick_vals, base=_GROWTH_OF_10K_BASE)
+        ReturnSeries(
+            dates=dates,
+            values=yardstick_vals,
+            frequency=yardstick_rs.frequency,
+            base=_GROWTH_OF_10K_BASE,
+        )
     )
     return {
         "fund": [
@@ -428,6 +438,7 @@ def _panel_to_return_series(panel: FundPanel, panel_key: str) -> ReturnSeries:
     return ReturnSeries(
         dates=tuple(p.date for p in points),
         values=np.array([p.value for p in points], dtype=np.float64),
+        frequency=Frequency.MONTHLY,
     )
 
 
@@ -496,6 +507,7 @@ def assemble_universe(
                         ],
                         dtype=np.float64,
                     ),
+                    frequency=rs.frequency,
                     base=rs.base,
                 )
                 for fid, rs in raw_history.items()

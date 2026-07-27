@@ -178,5 +178,7 @@ def rank_history(
     for fid, points in collected.items():
         dates = tuple(d for d, _ in points)
         vals = np.array([r for _, r in points], dtype=np.float64)
-        out[fid] = ReturnSeries(dates=dates, values=vals, base=panels[fid].base)
+        out[fid] = ReturnSeries(
+            dates=dates, values=vals, frequency=panels[fid].frequency, base=panels[fid].base
+        )
     return out
