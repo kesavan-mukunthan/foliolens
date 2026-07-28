@@ -27,6 +27,7 @@ from typing import Any
 
 from foliolens.report.flexipage.render import render_site
 from foliolens.report.flexipage.render.strings import (
+    IIMA_CITATION_URL,
     PERCENTILE_FOOTNOTE,
     T_STAT_SUPPRESSION_FOOTNOTE,
 )
@@ -96,25 +97,31 @@ def _fund(
     }
 
 
-def _rf_block() -> dict[str, Any]:
+def _rf_block(*, extended: dict[str, Any] | None = None) -> dict[str, Any]:
     return {
         "series_name": "rf-iima-91d-tbill",
         "frequency": "monthly",
         "last_date": "2026-06-30",
         "levels": {"1Y": 0.061, "3Y": 0.0625, "5Y": 0.060},
+        "extended": extended,
     }
 
 
-def _artifact(funds: list[dict[str, Any]], *, aggregates: dict[str, Any] | None = None) -> dict[str, Any]:
+def _artifact(
+    funds: list[dict[str, Any]],
+    *,
+    aggregates: dict[str, Any] | None = None,
+    rf: dict[str, Any] | None = None,
+) -> dict[str, Any]:
     return {
-        "schema_version": "flexipage-3",
+        "schema_version": "flexipage-4",
         "as_of": "2026-06-30",
         "universe": {
             "category": "flexi_cap",
             "count": len(funds),
             "yardstick": "NIFTY500TRI",
             "aggregates": aggregates if aggregates is not None else {},
-            "rf": _rf_block(),
+            "rf": rf if rf is not None else _rf_block(),
         },
         "funds": funds,
     }
@@ -321,3 +328,79 @@ def test_rf_footer_absent_for_pre_v3_artifact(tmp_path: Path) -> None:
         html = page.read_text(encoding="utf-8")
         assert "Risk-free basis" not in html
         assert "None" not in _rendered_text(html)
+
+
+# ---------------------------------------------------------------------------
+# D2d extension — rf carry-forward footer line + IIM-A citation.
+# ---------------------------------------------------------------------------
+
+
+def _extended_block(n: int) -> dict[str, Any]:
+    return {
+        "last_published": "2025-12-31",
+        "extended_through": "2026-06-30",
+        "n_extended": n,
+        "basis": (
+            "carried forward from 2025-12-31 at last published value "
+            "(IIM-A release pending); RBI repo held at 5.25% over the period"
+        ),
+    }
+
+
+def test_rf_extension_line_absent_when_rf_fully_covers(tmp_path: Path) -> None:
+    """No carry-forward -> no extension line, on either page."""
+    out = _render(tmp_path, _artifact([_fund("AAAA01")]))
+    for page in (out / "index.html", out / "funds" / "AAAA01.html"):
+        text = _rendered_text(page.read_text(encoding="utf-8"))
+        assert "carried forward" not in text
+        assert "extended flat" not in text
+
+
+def test_rf_extension_line_plain_at_six_months(tmp_path: Path) -> None:
+    """n_extended = 6 (at, not beyond, the escalation threshold) renders the
+    plain wording, not the escalated one.
+    """
+    artifact = _artifact([_fund("AAAA01")], rf=_rf_block(extended=_extended_block(6)))
+    out = _render(tmp_path, artifact)
+    for page in (out / "index.html", out / "funds" / "AAAA01.html"):
+        text = _rendered_text(page.read_text(encoding="utf-8"))
+        assert "rf extended flat from 2025-12-31 through 2026-06-30 (6 months)" in text
+        assert "carried forward from 2025-12-31 at last published value" in text
+        assert "risk-adjusted figures assume short rates unchanged" not in text
+
+
+def test_rf_extension_line_escalated_at_seven_months(tmp_path: Path) -> None:
+    """n_extended = 7 (beyond the 6-month escalation threshold) renders the
+    stronger, verbatim escalated wording instead of the plain line.
+    """
+    artifact = _artifact([_fund("AAAA01")], rf=_rf_block(extended=_extended_block(7)))
+    out = _render(tmp_path, artifact)
+    for page in (out / "index.html", out / "funds" / "AAAA01.html"):
+        text = _rendered_text(page.read_text(encoding="utf-8"))
+        assert (
+            "rf carried forward 7 months — risk-adjusted figures assume "
+            "short rates unchanged since 2025-12-31." in text
+        )
+        assert "rf extended flat from" not in text
+
+
+def test_iima_citation_always_present_alongside_rf_disclosure(tmp_path: Path) -> None:
+    """The IIM-A citation is a licence condition, not extension-dependent --
+    present on every page rendering the rf disclosure, whether or not rf is
+    currently extended.
+    """
+    unextended_dir = tmp_path / "unextended"
+    extended_dir = tmp_path / "extended"
+    unextended_dir.mkdir()
+    extended_dir.mkdir()
+    unextended = _render(unextended_dir, _artifact([_fund("AAAA01")]))
+    extended = _render(
+        extended_dir,
+        _artifact([_fund("AAAA01")], rf=_rf_block(extended=_extended_block(3))),
+    )
+    for out in (unextended, extended):
+        for page in (out / "index.html", out / "funds" / "AAAA01.html"):
+            html = page.read_text(encoding="utf-8")
+            text = _rendered_text(html)
+            assert "Agarwalla" in text
+            assert IIMA_CITATION_URL in html

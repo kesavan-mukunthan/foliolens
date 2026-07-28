@@ -12,6 +12,22 @@ LICENSING: the IIM-A factor library is NOT licensed for redistribution (derived
 from CMIE Prowess). Use as a computation input with citation; never republish the
 series as data. See CLAUDE.md.
 
+CITATION — a condition of the data source's terms of use, not a courtesy: every
+page rendering an rf-derived figure must display, verbatim,
+
+    Agarwalla, S. K., Jacob, J. and Varma, J. R. (2013), "Four factor model in
+    Indian equities market", W.P. No. 2013-09-05, Indian Institute of
+    Management, Ahmedabad.
+
+linked to
+https://faculty.iima.ac.in/~iffm/Indian-Fama-French-Momentum/four-factors-India-90s-onwards-IIM-WP-Version.pdf
+
+CARRY-FORWARD (:func:`extend_rf`): IIM-A's release cadence is roughly annual,
+so a cohort run's ``as_of`` routinely outruns the published series before the
+next release lands. The series is carried flat at its last published value,
+capped at :data:`RF_EXTENSION_CAP_MONTHS`, disclosed on every page via the
+returned :class:`RfExtension` — never persisted back to the rf store.
+
 FILE SHAPE (confirmed against the IIM-A monthly four-factor CSV,
 ``YYYY-MM_FourFactors_and_Market_Returns_Monthly_SurvivorshipBiasAdjusted.csv``):
     Date,SMB,HML,WML,MF,RF
@@ -26,6 +42,7 @@ from __future__ import annotations
 import calendar
 import csv
 import datetime
+from dataclasses import dataclass
 from decimal import Decimal, InvalidOperation
 from pathlib import Path
 
@@ -36,6 +53,12 @@ from ..model.value_objects import ReturnSeries
 from ..returns.frequency import Frequency
 
 _MONTH_FORMATS = ("%Y-%m", "%b-%Y", "%b-%y", "%m/%Y", "%Y%m")
+
+#: Carry-forward cap (calendar months) — see :func:`extend_rf`. IIM-A's
+#: cadence is roughly annual; a gap beyond this means the source has gone
+#: silent for over a year, and a stale rf must fail the build rather than
+#: carry flat for an unbounded stretch.
+RF_EXTENSION_CAP_MONTHS = 12
 
 
 def _month_end_date(raw: str) -> datetime.date:
@@ -62,6 +85,90 @@ def _month_end_date(raw: str) -> datetime.date:
         raise ValueError(f"unrecognised IIM-A month {raw!r}")
     last_day = calendar.monthrange(year, month)[1]
     return datetime.date(year, month, last_day)
+
+
+@dataclass(frozen=True)
+class RfExtension:
+    """Provenance for a carried-forward rf tail (D2d disclosure).
+
+    Produced by :func:`extend_rf` whenever the published series falls short
+    of a run's ``as_of``. The disclosure renders straight off this object
+    rather than re-deriving the carried span from the extended series, so
+    the carry-forward is always inspectable, never inferred.
+    """
+
+    last_published: datetime.date
+    extended_through: datetime.date
+    n_extended: int
+    carried_monthly_value: float
+
+
+def _months_between(start: datetime.date, end: datetime.date) -> int:
+    """Calendar months from ``start`` to ``end`` (both month-end dates)."""
+    return (end.year - start.year) * 12 + (end.month - start.month)
+
+
+def extend_rf(
+    rf: ReturnSeries, through: datetime.date
+) -> tuple[ReturnSeries, RfExtension | None]:
+    """Carry ``rf`` flat past its last published month, through ``through``.
+
+    IIM-A publishes roughly annually; a cohort run's ``as_of`` routinely
+    outruns the series before the next release lands. When ``through``'s
+    calendar month is already covered (``<=`` the series' last month), ``rf``
+    is returned unchanged and the extension is ``None`` — the common case.
+    Otherwise one point per missing calendar month-end is appended, each at
+    the last published monthly value (flat carry, never re-derived or
+    interpolated), capped at :data:`RF_EXTENSION_CAP_MONTHS`: beyond the cap
+    this raises rather than silently carrying a stale source for years.
+
+    Extension happens here, at load — never written back to the rf store —
+    so a future IIM-A refresh self-heals with no cleanup (mirrors
+    ``CLAUDE.md``'s "analytics reads stored NAV only" discipline for rf).
+    """
+    if len(rf) == 0:
+        raise ValueError("IIM-A: cannot extend an empty rf series")
+
+    last_published = rf.dates[-1]
+    through_month_end = datetime.date(
+        through.year, through.month, calendar.monthrange(through.year, through.month)[1]
+    )
+    if through_month_end <= last_published:
+        return rf, None
+
+    n_extended = _months_between(last_published, through_month_end)
+    if n_extended > RF_EXTENSION_CAP_MONTHS:
+        raise ValueError(
+            f"IIM-A rf series stale: last published month is "
+            f"{last_published.isoformat()}, requested through "
+            f"{through_month_end.isoformat()} ({n_extended} months out) — "
+            f"exceeds the {RF_EXTENSION_CAP_MONTHS}-month carry-forward cap"
+        )
+
+    carried_value = float(rf.values[-1])
+    new_dates = list(rf.dates)
+    year, month = last_published.year, last_published.month
+    for _ in range(n_extended):
+        month += 1
+        if month > 12:
+            month = 1
+            year += 1
+        new_dates.append(datetime.date(year, month, calendar.monthrange(year, month)[1]))
+
+    extended = ReturnSeries(
+        dates=tuple(new_dates),
+        values=np.concatenate(
+            [rf.values, np.full(n_extended, carried_value, dtype=np.float64)]
+        ),
+        frequency=rf.frequency,
+    )
+    extension = RfExtension(
+        last_published=last_published,
+        extended_through=new_dates[-1],
+        n_extended=n_extended,
+        carried_monthly_value=carried_value,
+    )
+    return extended, extension
 
 
 def parse_iima_rf(

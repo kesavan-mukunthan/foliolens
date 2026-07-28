@@ -115,6 +115,10 @@
     ({{ rf_disclosure.frequency }}); last observation {{ rf_disclosure.last_date }}.
     Annualised risk-free rate by window &mdash;
     {% for w in windows %}{{ w }}: {{ rf_disclosure.levels[w]|pct }}{% if not loop.last %}; {% endif %}{% endfor %}.</p>
+  {% if rf_extension_line %}
+  <p class="rf-extension">{{ rf_extension_line }}</p>
+  {% endif %}
+  <p class="iima-citation">{{ iima_citation_text }} <a href="{{ iima_citation_url }}">{{ iima_citation_url }}</a></p>
   {% endif %}
   <p class="footnote">{{ footnote }}</p>
   <p class="disclaimer">{{ disclaimer }}</p>

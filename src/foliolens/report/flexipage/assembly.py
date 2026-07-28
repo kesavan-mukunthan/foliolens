@@ -78,12 +78,15 @@ from foliolens.analytics.metrics import period_return_abs
 from foliolens.analytics.relative import RELATIVE_ROLLING_WINDOWS, rolling_excess_return
 from foliolens.analytics.series_ops import align_dated, between, trailing_anchored
 from foliolens.benchmark_map import TIER1
+from foliolens.ingest.iima import RfExtension
 from foliolens.model.investments import Investment
 from foliolens.model.sources import ReturnSource
 from foliolens.model.value_objects import ReturnSeries
 from foliolens.returns.convert import to_index
 from foliolens.returns.engine import period_return
 from foliolens.returns.frequency import Frequency
+
+from .render.strings import RF_EXTENSION_REPO_CLAUSE
 
 #: Artifact schema version for this page's durable output (``spec-flexicap-page §3``).
 #: ``flexipage-2`` added the per-fund ``windows`` disclosure block (effective-n
@@ -93,8 +96,12 @@ from foliolens.returns.frequency import Frequency
 #: basis every Sharpe/Sortino/alpha was computed against (D2d). A presentation-
 #: driven schema addition only — no metric changes; the per-window rf level
 #: reuses the existing ``_rf_return_scalar`` pathway that already backs the
-#: per-fund ``rf_{window}`` metric.
-SCHEMA_VERSION = "flexipage-3"
+#: per-fund ``rf_{window}`` metric. ``flexipage-4`` adds the rf block's
+#: ``extended`` sub-block (:class:`~foliolens.ingest.iima.RfExtension`,
+#: nullable) — present whenever ``ingest.iima.extend_rf`` carried the series
+#: past its last published month for this run, so the footer can disclose the
+#: carry-forward alongside the always-present IIM-A citation.
+SCHEMA_VERSION = "flexipage-4"
 
 #: Calendar years rendered per fund (``spec-flexicap-page §2``).
 CALENDAR_YEARS: tuple[int, ...] = (2023, 2024, 2025)
@@ -546,7 +553,25 @@ def _rf_return_scalar(rf_rs: ReturnSeries, months: int, as_of: date) -> float | 
     return _safe_float(float(panel.values[idx]))
 
 
-def build_rf_disclosure(rf: Investment, as_of: date) -> dict[str, object]:
+def _rf_extension_basis(extension: RfExtension) -> str:
+    """The rf-extension disclosure's basis text (D2d extension).
+
+    Built off the extension object's own ``last_published`` date — never a
+    hardcoded one. Only the repo-rate clause
+    (:data:`~foliolens.report.flexipage.render.strings.RF_EXTENSION_REPO_CLAUSE`)
+    is a plain, independently-editable string: it applies only while stated,
+    and lives in one place so a future rate move is a one-line edit, never a
+    logic change.
+    """
+    return (
+        f"carried forward from {extension.last_published.isoformat()} at last "
+        f"published value (IIM-A release pending); {RF_EXTENSION_REPO_CLAUSE}"
+    )
+
+
+def build_rf_disclosure(
+    rf: Investment, as_of: date, extension: RfExtension | None = None
+) -> dict[str, object]:
     """The universe-level risk-free disclosure block (D2d, ``flexipage-3``).
 
     Everything is read off the rf ``Investment`` and its own series (nothing
@@ -558,6 +583,14 @@ def build_rf_disclosure(rf: Investment, as_of: date) -> dict[str, object]:
     exactly the rf level the window's metrics were measured against, not a
     separately-derived figure. A window's level is ``None`` when rf's history
     does not reach ``as_of`` for it.
+
+    ``extension`` (``flexipage-4``) is the :class:`~foliolens.ingest.iima.RfExtension`
+    the caller got back from ``ingest.iima.extend_rf`` for this run, or
+    ``None`` when rf's own history already reaches ``as_of`` unextended — by
+    this point ``rf`` itself is already the extended series (the caller wires
+    the carried-forward ``Investment`` in before calling this), so ``levels``
+    above is computed over carried months too; ``extended`` only adds the
+    provenance the footer discloses alongside it.
     """
     rf_rs = rf.returns(Frequency.MONTHLY)
     last_date = rf_rs.dates[-1].isoformat() if rf_rs.dates else None
@@ -568,6 +601,14 @@ def build_rf_disclosure(rf: Investment, as_of: date) -> dict[str, object]:
         "levels": {
             label: _rf_return_scalar(rf_rs, months, as_of)
             for label, months in _RELATIVE_WINDOWS.items()
+        },
+        "extended": None
+        if extension is None
+        else {
+            "last_published": extension.last_published.isoformat(),
+            "extended_through": extension.extended_through.isoformat(),
+            "n_extended": extension.n_extended,
+            "basis": _rf_extension_basis(extension),
         },
     }
 

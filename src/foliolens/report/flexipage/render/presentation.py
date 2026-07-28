@@ -11,6 +11,8 @@ from __future__ import annotations
 from dataclasses import dataclass
 from typing import Any
 
+from .strings import RF_EXTENSION_ESCALATED_TEMPLATE, RF_EXTENSION_FOOTER_TEMPLATE
+
 #: Trailing windows shown across every per-fund metrics table.
 WINDOWS: tuple[str, ...] = ("1Y", "3Y", "5Y")
 
@@ -330,3 +332,33 @@ def nav_entries(funds: list[dict[str, Any]]) -> list[dict[str, str]]:
     return [
         {"amfi_code": f["amfi_code"], "scheme_name": f["scheme_name"]} for f in funds
     ]
+
+
+#: Carried-month count above which the rf carry-forward footer line escalates
+#: to the stronger wording (D2d extension) — beyond a handful of months, a
+#: reader relying on Sharpe/Sortino/alpha needs to be told plainly that the
+#: risk-adjusted figures assume short rates unchanged, not just that rf was
+#: extended.
+RF_EXTENSION_ESCALATION_MONTHS = 6
+
+
+def rf_extension_line(extended: dict[str, Any] | None) -> str | None:
+    """The footer's rf carry-forward line (D2d extension), plain or escalated.
+
+    ``None`` when rf is not currently extended (``universe.rf.extended`` is
+    absent or null) — the footer simply omits the line. Every field comes
+    straight off the artifact's own ``extended`` block, never re-derived.
+    """
+    if not extended:
+        return None
+    n = extended["n_extended"]
+    if n > RF_EXTENSION_ESCALATION_MONTHS:
+        return RF_EXTENSION_ESCALATED_TEMPLATE.format(
+            n=n, last_published=extended["last_published"]
+        )
+    return RF_EXTENSION_FOOTER_TEMPLATE.format(
+        last_published=extended["last_published"],
+        extended_through=extended["extended_through"],
+        n=n,
+        basis=extended["basis"],
+    )

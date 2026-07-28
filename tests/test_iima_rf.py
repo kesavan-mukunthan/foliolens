@@ -6,14 +6,22 @@ CSV mirrors the confirmed IIM-A monthly four-factor shape (header
 """
 from __future__ import annotations
 
+import calendar
 from datetime import date
 from pathlib import Path
 
 import numpy as np
 import pytest
 
-from foliolens.ingest.iima import parse_iima_rf, rf_investment
+from foliolens.ingest.iima import (
+    RF_EXTENSION_CAP_MONTHS,
+    RfExtension,
+    extend_rf,
+    parse_iima_rf,
+    rf_investment,
+)
 from foliolens.model.investments import Investment, SeriesInvestment
+from foliolens.model.value_objects import ReturnSeries
 from foliolens.returns.frequency import Frequency
 
 _IIMA_CSV = (
@@ -78,3 +86,78 @@ def test_rf_investment_satisfies_protocol(tmp_path: Path) -> None:
     assert rf.benchmark is None
     assert rf.holdings == ()
     assert rf.returns(Frequency.MONTHLY).values.dtype == np.float64
+
+
+# ---------------------------------------------------------------------------
+# extend_rf — rf carry-forward (D2d)
+# ---------------------------------------------------------------------------
+
+
+def _monthly_rf(n: int, *, start_year: int = 2025, start_month: int = 1) -> ReturnSeries:
+    dates = []
+    year, month = start_year, start_month
+    for _ in range(n):
+        dates.append(date(year, month, calendar.monthrange(year, month)[1]))
+        month += 1
+        if month > 12:
+            month = 1
+            year += 1
+    return ReturnSeries(
+        dates=tuple(dates),
+        values=np.linspace(0.003, 0.003 + 0.0001 * (n - 1), n),
+        frequency=Frequency.MONTHLY,
+    )
+
+
+def test_through_covered_month_returns_unchanged_and_none() -> None:
+    rf = _monthly_rf(12, start_year=2025, start_month=1)  # last month 2025-12
+    through = date(2025, 12, 15)  # same month as last published
+
+    extended, extension = extend_rf(rf, through)
+
+    assert extended is rf
+    assert extension is None
+
+
+def test_extends_three_months_at_carried_value() -> None:
+    rf = _monthly_rf(12, start_year=2025, start_month=1)  # last month 2025-12
+    last_value = float(rf.values[-1])
+    through = date(2026, 3, 31)
+
+    extended, extension = extend_rf(rf, through)
+
+    assert len(extended) == 15
+    new_dates = extended.dates[12:]
+    assert new_dates == (date(2026, 1, 31), date(2026, 2, 28), date(2026, 3, 31))
+    assert all(v == pytest.approx(last_value) for v in extended.values[12:])
+    # Original published values are untouched.
+    assert np.array_equal(extended.values[:12], rf.values)
+    assert extension == RfExtension(
+        last_published=date(2025, 12, 31),
+        extended_through=date(2026, 3, 31),
+        n_extended=3,
+        carried_monthly_value=last_value,
+    )
+
+
+def test_boundary_twelve_months_succeeds() -> None:
+    rf = _monthly_rf(12, start_year=2025, start_month=1)  # last month 2025-12
+    through = date(2026, 12, 31)  # exactly RF_EXTENSION_CAP_MONTHS out
+
+    extended, extension = extend_rf(rf, through)
+
+    assert extension is not None
+    assert extension.n_extended == RF_EXTENSION_CAP_MONTHS == 12
+    assert extended.dates[-1] == date(2026, 12, 31)
+
+
+def test_beyond_cap_raises_naming_last_published_requested_and_cap() -> None:
+    rf = _monthly_rf(12, start_year=2025, start_month=1)  # last month 2025-12
+    through = date(2027, 1, 31)  # 13 months out
+
+    with pytest.raises(ValueError, match="2025-12-31") as exc_info:
+        extend_rf(rf, through)
+
+    message = str(exc_info.value)
+    assert "2027-01-31" in message
+    assert "12" in message
