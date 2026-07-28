@@ -18,6 +18,25 @@ from foliolens.model.value_objects import ReturnSeries
 from ..returns.frequency import Frequency
 
 
+class InsufficientHistoryError(ValueError):
+    """A metric's minimum-points guard was not met — never a raw ``ValueError``.
+
+    Distinguishes "no value to report because there is not enough history yet"
+    (a young fund, a short overlap) from every other ``ValueError`` a metric can
+    raise (frequency mismatch, invalid inputs, a degenerate zero-variance
+    input) — only this class is the artifact's null path
+    (``analytics/artifact.py``'s ``_null_safe``); everything else propagates
+    uncaught. ``required``/``available`` carry the shortfall so the artifact's
+    ``refused`` disclosure can attribute the null (``insufficient_history(required=…,
+    available=…)``) instead of leaving it a bare unexplained ``None``.
+    """
+
+    def __init__(self, required: int, available: int, message: str | None = None) -> None:
+        self.required = required
+        self.available = available
+        super().__init__(message or f"insufficient history: need >= {required}, got {available}")
+
+
 def require_frequency(rs: ReturnSeries, expected: Frequency) -> None:
     """Raise ValueError if ``rs.frequency`` != ``expected``.
 
