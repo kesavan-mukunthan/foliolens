@@ -16,3 +16,7 @@ jobs:
       - run: uv run ruff check .
       - run: uv run mypy --strict src
       - run: uv run pytest
+      - name: TESTS.md drift check
+        run: |
+          uv run python scripts/gen_tests_md.py
+          git diff --exit-code tests/TESTS.md
