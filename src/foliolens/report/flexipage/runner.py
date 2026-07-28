@@ -31,7 +31,7 @@ import sys
 from dataclasses import dataclass
 from datetime import date
 from pathlib import Path
-from typing import Any
+from typing import Any, cast
 
 import pyarrow as pa
 
@@ -389,7 +389,7 @@ def run(
     )
 
     violations: list[IdentityViolation] = []
-    for fund_entry in artifact["funds"]:
+    for fund_entry in cast("list[dict[str, Any]]", artifact["funds"]):
         violations.extend(check_identities(fund_entry))
     if violations:
         raise IdentityCheckError(
