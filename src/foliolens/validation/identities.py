@@ -37,13 +37,31 @@ from typing import Any
 _WINDOWS: tuple[str, ...] = ("1Y", "3Y", "5Y")
 
 #: Fixed tolerances (CLAUDE.md validation discipline: never loosened at
-#: runtime). Sharpe/IR are dimensionless ratios; alpha's is expressed as a
-#: fraction (the same units as the return-like fields it combines).
-_SHARPE_TOL = 0.15
-_IR_TOL = 0.15
+#: runtime). Sharpe/IR are ratio identities: reported value vs. a numerator
+#: divided by the row's own volatility/tracking-error. A flat tolerance on
+#: the ratio was found (production run) to over-flag funds with a small
+#: denominator — low volatility, or low tracking error from close
+#: benchmark-hugging — where the same ~3pp annualised numerator noise
+#: (arithmetic-vs-geometric excess, day-count slack between the stored
+#: field and the one re-derived here — the same convention gap _ALPHA_TOL
+#: already budgets for) divides through into a large ratio gap that is
+#: convention slack, not an assembly defect. The tolerance is therefore
+#: scaled by the same denominator the ratio itself divides by, floored at
+#: the original flat calibration so typical-denominator funds (volatility/TE
+#: in the ~15-20% range) see no change.
+_TOLERANCE_SLACK_BUDGET = 0.03  # 3pp annualised numerator noise budget
+_TOLERANCE_FLOOR = 0.15  # original flat calibration; the scaled tolerance never goes below this
 #: simulation-calibrated: CAGR-vs-arithmetic convention slack p90 ≈ 2.2pp at
 #: 1Y; guarded defect class ≥ 5pp (site regression, fund 118424).
 _ALPHA_TOL = 0.03
+
+
+def _ratio_tolerance(denominator: float) -> float:
+    """Tolerance for a ratio identity (sharpe/ir) whose reported value
+    divides by ``denominator`` (volatility or tracking error). See the
+    calibration note above ``_TOLERANCE_SLACK_BUDGET``.
+    """
+    return max(_TOLERANCE_SLACK_BUDGET / abs(denominator), _TOLERANCE_FLOOR)
 
 
 @dataclass(frozen=True)
@@ -111,7 +129,7 @@ def check_identities(row: Mapping[str, Any]) -> list[IdentityViolation]:
         ):
             predicted = (fund_return - rf_return) / volatility
             gap = abs(sharpe_reported - predicted)
-            if gap > _SHARPE_TOL:
+            if gap > _ratio_tolerance(volatility):
                 violations.append(
                     IdentityViolation(
                         amfi_code, window, "sharpe", sharpe_reported, predicted, gap
@@ -127,7 +145,7 @@ def check_identities(row: Mapping[str, Any]) -> list[IdentityViolation]:
         ):
             predicted = (fund_return - benchmark_return) / tracking_error
             gap = abs(ir_reported - predicted)
-            if gap > _IR_TOL:
+            if gap > _ratio_tolerance(tracking_error):
                 violations.append(
                     IdentityViolation(amfi_code, window, "ir", ir_reported, predicted, gap)
                 )
