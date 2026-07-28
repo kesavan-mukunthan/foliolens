@@ -14,6 +14,11 @@
     calendar derived from 108466 alone — and a month where 108466's own last
     NAV predates the cohort's last trading day is rejected under the cohort
     calendar specifically
+(h) on-or-after completeness (tail-match fix): a month whose last in-month
+    NAV is dated on-or-after the last trading day (a weekend-dated or
+    fiscal-year-end close) is emitted; only a truncated month (last NAV before
+    the last trading day) is rejected, and a close-reached-but-no-M+1 month is
+    still withheld
 
 GREEN (this commit): (a)-(c) run over the calendar-derived
 ``returns/monthly.monthly_returns`` path — the trading calendar (from
