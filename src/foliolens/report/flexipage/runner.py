@@ -233,14 +233,32 @@ def _index_landed(data_access: DataAccess, index_code: str) -> bool:
 
 
 def _build_benchmark(
-    data_access: DataAccess, index_code: str, cal: TradingCalendar
+    data_access: DataAccess, index_code: str, cal: TradingCalendar  # noqa: ARG001
 ) -> Benchmark:
-    """The category yardstick's Investment, panels built off the same ``cal``
-    as every fund — so the benchmark's monthly panel lands on the exact same
-    calendar month-ends as the funds it is compared against (required for
-    :func:`~foliolens.analytics.series_ops.align_dated` to find an overlap).
+    """The category yardstick's Investment, panels built off *its own*
+    trading calendar — derived from the index's own published dates, never
+    the shared equity-cohort ``cal``.
+
+    Many AMCs publish a NAV dated 31 March (the fiscal year-end) even on a
+    day the exchange has no session; the cohort calendar's majority-publish
+    rule over fund NAVs then treats 31 March as a trading day no benchmark
+    index ever actually traded on. Passing that calendar straight through to
+    :func:`~foliolens.model.investments.benchmark_from_index` silently drops
+    March — the index has no level dated on the day the cohort calendar
+    insists is March's last trading day — and, by ``monthly_returns``'s
+    adjacent-month rule, cascades to drop April too (found in production:
+    NIFTY500TRI's monthly panel missing 2024/2025/2026 March+April under the
+    shared cohort calendar, thinning several funds' tracking-error overlap
+    and surfacing as B1 IR identity violations). See
+    ``tests/invariants/test_benchmark_calendar.py`` for the reproduction.
+
+    ``cal`` is accepted but unused — kept so every call site in this module
+    still threads the one cohort calendar through uniformly; the benchmark
+    is the one Investment in the run whose own calendar diverges from it.
     """
-    return benchmark_from_index(_load_index_series_checked(data_access, index_code), cal)
+    levels = _load_index_series_checked(data_access, index_code)
+    own_cal = calendar_from_dates(d for d, _ in levels.data)
+    return benchmark_from_index(levels, own_cal)
 
 
 def _carry_forward_commentary(artifact: dict[str, Any], previous_path: Path) -> int:
