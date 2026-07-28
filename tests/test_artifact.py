@@ -27,21 +27,28 @@ from foliolens.analytics import (
 )
 from foliolens.analytics.metrics import period_return_abs
 from foliolens.analytics.series_ops import between
-from foliolens.model.investments import SeriesInvestment
+from foliolens.model.investments import ShareClass, SeriesInvestment
 from foliolens.model.value_objects import ReturnSeries
 from foliolens.returns.frequency import Frequency
-from fixtures import daily_shareclass, fixed_investment, returns_series
+from fixtures import daily_shareclass, returns_series
 
 
 def _is_month_end(d: date) -> bool:
     return d.day == monthrange(d.year, d.month)[1]
 
 
-def _healthy_fund() -> SeriesInvestment:
-    # 60 months (2023-01 .. 2027-12): populates every 1Y/3Y/5Y window.
+def _healthy_fund() -> ShareClass:
+    # 1828 days from 2022-12-31 (the pre-period NAV base date) -> exactly 60
+    # monthly RETURN points, 2023-01-31 .. 2027-12-31 -- populates every
+    # 1Y/3Y/5Y window. Built via the real factory (daily_shareclass ->
+    # share_class_from_nav) so it carries both DAILY and MONTHLY panels, like
+    # every production Investment: a hand-rolled SeriesInvestment with only a
+    # MONTHLY panel is fixture debt, not a case build_metrics should ever
+    # silently null (a missing panel is a construction bug and stays loud --
+    # B3 amendment).
     rng = np.random.default_rng(42)
-    values = rng.normal(0.01, 0.04, 60)
-    return fixed_investment(values, id="HEALTHY")
+    levels = 100.0 * np.cumprod(1.0 + rng.normal(0.01, 0.04, 1828))
+    return daily_shareclass(levels, start=date(2022, 12, 31), id="HEALTHY")
 
 
 def _rf(n: int = 60) -> SeriesInvestment:
@@ -49,6 +56,29 @@ def _rf(n: int = 60) -> SeriesInvestment:
     return SeriesInvestment(
         id="rf", returns_series=returns_series(np.full(n, monthly_r))
     )
+
+
+def _rf_for(rs: ReturnSeries) -> SeriesInvestment:
+    """rf on exactly ``rs``'s dates — for fixtures not anchored at ``_rf()``'s
+    canonical 2023-01 start (e.g. the young fund below)."""
+    monthly_r = (1.06) ** (1 / 12) - 1
+    return SeriesInvestment(
+        id="rf",
+        returns_series=ReturnSeries(
+            dates=rs.dates, values=np.full(len(rs), monthly_r), frequency=rs.frequency
+        ),
+    )
+
+
+def _young_fund() -> ShareClass:
+    # 95 days from 2024-01-01 -> exactly 2 monthly RETURN points
+    # (2024-02-29, 2024-03-31): short enough that every 1Y/3Y/5Y window and
+    # skew/kurtosis (need >= 3 / >= 4) are genuinely absent/insufficient, but
+    # a real ShareClass (both panels, via the factory) so the daily-basis
+    # family is never a missing-panel construction bug.
+    rng = np.random.default_rng(3)
+    levels = 100.0 * np.cumprod(1.0 + rng.normal(0.0, 0.02, 95))
+    return daily_shareclass(levels, start=date(2024, 1, 1), id="YOUNG")
 
 
 # ---------------------------------------------------------------------------
@@ -171,9 +201,10 @@ def test_series_point_round_trip() -> None:
 
 
 def test_young_fund_nulls_not_errors() -> None:
-    # Two months only: 1Y/3Y/5Y windows, skew/kurtosis, and daily-basis all null.
-    young = fixed_investment([0.02, -0.01], id="YOUNG")
-    mr = build_metrics(young, _rf(2))
+    # Two monthly points only: 1Y/3Y/5Y windows and skew/kurtosis null.
+    young = _young_fund()
+    rs = young.returns(Frequency.MONTHLY)
+    mr = build_metrics(young, _rf_for(rs))
     m = mr.metrics
     # Windows longer than history → null.
     for label in ("1Y", "3Y", "5Y"):
@@ -185,24 +216,26 @@ def test_young_fund_nulls_not_errors() -> None:
     # Sub-year windows longer than history → null.
     assert m["return_3M"] is None
     assert m["return_6M"] is None
-    # Daily-basis family has no NAV source on a SeriesInvestment → null.
-    assert m["max_drawdown_SI"] is None
-    assert m["var95_SI"] is None
-    assert m["cvar95_SI"] is None
+    # Daily-basis family reads the fund's real (if short) daily NAV -- a
+    # young fund still has *some* daily history, so these populate rather
+    # than null (null-propagation is history-specific, never a blanket
+    # "young == null everywhere"; a genuinely source-less investment is
+    # fixture debt per _healthy_fund's docstring, not a case this family
+    # nulls in production, where every Investment carries both panels).
+    assert m["max_drawdown_SI"] is not None
+    assert m["var95_SI"] is not None
+    assert m["cvar95_SI"] is not None
     # What IS computable stays populated (not nulled indiscriminately).
     assert m["volatility_SI"] is not None   # 2 points is enough for volatility
     assert m["return_1M"] is not None
 
 
 def test_refused_populated_for_insufficient_history_metrics() -> None:
-    # NAV-backed (daily_shareclass) so the daily-basis family (max_drawdown/
-    # var/cvar) succeeds on its own >= 1 point guard and doesn't interfere;
-    # only 2 monthly points -> skew (needs >= 3) / kurtosis (needs >= 4) and
+    # Only 2 monthly points -> skew (needs >= 3) / kurtosis (needs >= 4) and
     # every 1Y/3Y/5Y window (needs 12/36/60) raise InsufficientHistoryError.
-    rng = np.random.default_rng(3)
-    levels = 100.0 * np.cumprod(1.0 + rng.normal(0.0, 0.01, 95))
-    young = daily_shareclass(levels, id="YOUNG2")
-    mr = build_metrics(young, _rf(2))
+    young = _young_fund()
+    rs = young.returns(Frequency.MONTHLY)
+    mr = build_metrics(young, _rf_for(rs))
 
     assert mr.metrics["skew_SI"] is None
     assert mr.metrics["kurtosis_SI"] is None
@@ -215,8 +248,8 @@ def test_refused_populated_for_insufficient_history_metrics() -> None:
 
 
 def test_young_fund_rolling_panels_empty() -> None:
-    young = fixed_investment([0.02, -0.01], id="YOUNG")
-    mr = build_metrics(young, _rf(2))
+    young = _young_fund()
+    mr = build_metrics(young, _rf_for(young.returns(Frequency.MONTHLY)))
     for label in ("1Y", "3Y", "5Y"):
         assert mr.series[f"rolling_return_{label}"] == ()
 
@@ -234,7 +267,7 @@ def test_source_backed_daily_metrics_populate() -> None:
 
 
 def test_young_fund_round_trips() -> None:
-    young = fixed_investment([0.02, -0.01], id="YOUNG")
-    mr = build_metrics(young, _rf(2))
+    young = _young_fund()
+    mr = build_metrics(young, _rf_for(young.returns(Frequency.MONTHLY)))
     text = json.dumps(mr.to_dict(), allow_nan=False)
     assert MetricsResult.from_dict(json.loads(text)) == mr
