@@ -31,8 +31,10 @@ def to_returns(nav: NavSeries, *, frequency: Frequency) -> ReturnSeries:
     """Simple returns between consecutive points of ``nav`` as passed.
 
     No resampling happens here. The canonical monthly analytical panel is
-    ``to_returns(nav.month_end(), frequency=Frequency.MONTHLY)`` — resample
-    first, then convert. Period-end dates are ``nav.data[1:]``; the base
+    ``returns/monthly.monthly_returns(nav, cal)`` — calendar-derived month-end
+    resample, not this function (``monthly_returns`` reuses :func:`simple_return`
+    directly). ``to_returns`` itself is the DAILY-panel seam: consecutive-day
+    NAV in, daily returns out. Period-end dates are ``nav.data[1:]``; the base
     anchor is Decimal("100"). ``frequency`` is declared explicitly by the
     caller — never inferred from the dates.
 

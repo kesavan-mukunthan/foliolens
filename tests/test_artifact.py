@@ -29,6 +29,7 @@ from foliolens.analytics.metrics import period_return_abs
 from foliolens.analytics.series_ops import between
 from foliolens.model.investments import SeriesInvestment
 from foliolens.model.value_objects import ReturnSeries
+from foliolens.returns.frequency import Frequency
 from fixtures import daily_shareclass, fixed_investment, returns_series
 
 
@@ -83,10 +84,10 @@ def test_metadata_merge_is_caller_authoritative() -> None:
 
 def test_metrics_carry_computed_values() -> None:
     fund, rf = _healthy_fund(), _rf()
-    rs = fund.returns
+    rs = fund.returns(Frequency.MONTHLY)
     mr = build_metrics(fund, rf)
     assert mr.metrics["volatility_SI"] == volatility(rs)
-    assert mr.metrics["sharpe_SI"] == sharpe(rs, rf.returns)
+    assert mr.metrics["sharpe_SI"] == sharpe(rs, rf.returns(Frequency.MONTHLY))
     assert mr.metrics["skew_SI"] == skew(rs)
     # Windowed metric == the pure function on the trailing slice.
     last12 = ReturnSeries(
@@ -107,7 +108,7 @@ def test_figures_of_record_merged_verbatim() -> None:
 
 def test_return_ytd_matches_between_window() -> None:
     fund = _healthy_fund()
-    rs = fund.returns
+    rs = fund.returns(Frequency.MONTHLY)
     mr = build_metrics(fund, _rf())
     ytd_window = between(rs, date(2027, 1, 1), date(2027, 12, 31))
     assert mr.metrics["return_YTD"] == period_return_abs(
@@ -122,7 +123,7 @@ def test_return_ytd_matches_between_window() -> None:
 
 def test_rolling_series_keyed_by_month_end() -> None:
     fund = _healthy_fund()
-    rs = fund.returns
+    rs = fund.returns(Frequency.MONTHLY)
     mr = build_metrics(fund, _rf())
     panel = mr.series["rolling_return_1Y"]
     want = rolling_return(rs, 12)

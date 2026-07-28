@@ -5,10 +5,12 @@ Gates enforced here:
   - NavSeries: duplicate dates deduplicated, last entry wins
   - NavSeries: rejects non-Decimal nav values at construction
   - NavSeries.as_of: returns last available nav on-or-before the query date
-  - NavSeries.month_end: picks the last trading day of each calendar month
-  - NavSeries.month_end: weekend boundary — Friday nav selected when month-end is a weekend
-  - NavSeries.month_end: never looks ahead into the next calendar month
   - ShareClass and Fund both satisfy ReturnSource (typed _check + runtime isinstance)
+
+Calendar-derived month-end resampling (last trading day of each month, weekend
+boundary, no-lookahead, strict M+1 completeness) lives in
+``returns/monthly.month_end`` and is covered by ``tests/invariants/test_month_end.py``
+— ``NavSeries.month_end()`` itself was deleted.
 """
 from __future__ import annotations
 
@@ -17,9 +19,10 @@ from decimal import Decimal
 
 import pytest
 
-from foliolens.model.investments import Fund, ShareClass
-from foliolens.model.sources import PricedSource, ReturnSource
+from foliolens.model.investments import Fund, share_class_from_nav
+from foliolens.model.sources import ReturnSource
 from foliolens.model.value_objects import NavSeries
+from fixtures import synthetic_calendar
 
 
 # ---------------------------------------------------------------------------
@@ -111,53 +114,6 @@ def test_as_of_after_last_date_returns_last() -> None:
 
 
 # ---------------------------------------------------------------------------
-# NavSeries.month_end — last trading day of each month
-# ---------------------------------------------------------------------------
-
-
-def test_month_end_picks_last_in_month() -> None:
-    ns = _nav(
-        (date(2024, 1, 2), Decimal("100.00")),
-        (date(2024, 1, 15), Decimal("101.00")),
-        (date(2024, 1, 30), Decimal("102.00")),
-        (date(2024, 2, 1), Decimal("103.00")),
-    )
-    me = ns.month_end()
-    jan_nav = next((nav for d, nav in me.data if d.month == 1), None)
-    assert jan_nav == Decimal("102.00")
-
-
-def test_month_end_weekend_boundary() -> None:
-    # June 30 2024 is a Sunday; the last trading day is June 28 (Friday)
-    ns = _nav(
-        (date(2024, 6, 26), Decimal("500.00")),
-        (date(2024, 6, 27), Decimal("501.00")),
-        (date(2024, 6, 28), Decimal("502.00")),  # last before weekend month-end
-        # no NAV on Jun 29 (Sat) or Jun 30 (Sun)
-        (date(2024, 7, 1), Decimal("503.00")),
-    )
-    me = ns.month_end()
-    jun = [(d, nav) for d, nav in me.data if d.month == 6]
-    assert len(jun) == 1
-    d_selected, nav_selected = jun[0]
-    assert nav_selected == Decimal("502.00")
-    assert d_selected == date(2024, 6, 28)
-
-
-def test_month_end_no_lookahead() -> None:
-    # July 1 must never appear as the June month-end entry
-    ns = _nav(
-        (date(2024, 1, 31), Decimal("100.00")),
-        (date(2024, 2, 1), Decimal("101.00")),
-    )
-    me = ns.month_end()
-    jan = [(d, nav) for d, nav in me.data if d.month == 1]
-    assert len(jan) == 1
-    assert jan[0][1] == Decimal("100.00")
-    assert jan[0][0].month == 1
-
-
-# ---------------------------------------------------------------------------
 # ReturnSource conformance — typed check for mypy + runtime isinstance
 # ---------------------------------------------------------------------------
 
@@ -166,30 +122,25 @@ def _check(x: ReturnSource) -> None:
     """Typed gate: mypy rejects a call if x does not structurally satisfy ReturnSource."""
 
 
-def test_shareclass_satisfies_return_source() -> None:
-    nav = _nav((date(2024, 1, 2), Decimal("100.00")))
-    sc = ShareClass(
-        id="SC001",
-        amfi_code="999999",
-        isin="INF999X01X99",
-        plan="direct",
-        option="growth",
-        source=PricedSource(nav=nav),
+def _minimal_shareclass():
+    nav = _nav(
+        (date(2024, 1, 2), Decimal("100.00")),
+        (date(2024, 2, 2), Decimal("101.00")),
     )
+    cal = synthetic_calendar([d for d, _ in nav.data])
+    return share_class_from_nav(
+        "SC001", nav, cal, isin="INF999X01X99", plan="direct", option="growth"
+    )
+
+
+def test_shareclass_satisfies_return_source() -> None:
+    sc = _minimal_shareclass()
     _check(sc)
     assert isinstance(sc, ReturnSource)
 
 
 def test_fund_satisfies_return_source() -> None:
-    nav = _nav((date(2024, 1, 2), Decimal("100.00")))
-    sc = ShareClass(
-        id="SC001",
-        amfi_code="999999",
-        isin="INF999X01X99",
-        plan="direct",
-        option="growth",
-        source=PricedSource(nav=nav),
-    )
+    sc = _minimal_shareclass()
     fund = Fund(id="F001", name="Test Fund", representative=sc)
     _check(fund)
     assert isinstance(fund, ReturnSource)

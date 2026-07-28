@@ -22,8 +22,6 @@ from foliolens.model.value_objects import ReturnSeries
 from ..returns.frequency import Frequency
 from .series_ops import align, between, require_frequency
 
-_MONTHS_PER_YEAR = 12.0
-
 
 def period_return_abs(rs: ReturnSeries, start: date, end: date) -> float:
     """Absolute (non-annualised) compounded return over ``[start, end]``.
@@ -47,18 +45,20 @@ def volatility(rs: ReturnSeries) -> float:
     require_frequency(rs, Frequency.MONTHLY)
     if len(rs) < 2:
         raise ValueError(f"volatility needs >= 2 returns, got {len(rs)}")
-    return float(np.std(rs.values, ddof=1) * np.sqrt(_MONTHS_PER_YEAR))
+    return float(np.std(rs.values, ddof=1) * np.sqrt(rs.frequency.periods_per_year))
 
 
-def _downside_deviation(excess: npt.NDArray[np.float64]) -> float:
+def _downside_deviation(
+    excess: npt.NDArray[np.float64], periods_per_year: int
+) -> float:
     """Annualised downside deviation of an already-aligned excess-return array.
 
-    ``√( mean( min(excess, 0)² ) ) × √12`` — the denominator is the *full* sample
-    count N (not the count of negatives), per the Sortino/Sunrise definition and
-    ``empyrical.downside_risk``.
+    ``√( mean( min(excess, 0)² ) ) × √periods_per_year`` — the denominator is
+    the *full* sample count N (not the count of negatives), per the
+    Sortino/Sunrise definition and ``empyrical.downside_risk``.
     """
     downside = np.clip(excess, -np.inf, 0.0)
-    return float(np.sqrt(np.mean(np.square(downside))) * np.sqrt(_MONTHS_PER_YEAR))
+    return float(np.sqrt(np.mean(np.square(downside))) * np.sqrt(periods_per_year))
 
 
 def downside_deviation(rs: ReturnSeries, mar: ReturnSeries) -> float:
@@ -72,7 +72,7 @@ def downside_deviation(rs: ReturnSeries, mar: ReturnSeries) -> float:
     r, m = align(rs, mar)
     if len(r) < 1:
         raise ValueError("downside_deviation needs >= 1 overlapping return")
-    return _downside_deviation(r - m)
+    return _downside_deviation(r - m, rs.frequency.periods_per_year)
 
 
 def sharpe(rs: ReturnSeries, rf: ReturnSeries) -> float:
@@ -88,7 +88,7 @@ def sharpe(rs: ReturnSeries, rf: ReturnSeries) -> float:
         raise ValueError(f"sharpe needs >= 2 overlapping returns, got {len(r)}")
     excess = r - f
     return float(
-        np.mean(excess) / np.std(excess, ddof=1) * np.sqrt(_MONTHS_PER_YEAR)
+        np.mean(excess) / np.std(excess, ddof=1) * np.sqrt(rs.frequency.periods_per_year)
     )
 
 
@@ -107,10 +107,10 @@ def sortino(rs: ReturnSeries, rf: ReturnSeries) -> float:
     if len(r) < 2:
         raise ValueError(f"sortino needs >= 2 overlapping returns, got {len(r)}")
     excess = r - f
-    downside = _downside_deviation(excess)
+    downside = _downside_deviation(excess, rs.frequency.periods_per_year)
     if downside == 0.0:
         raise ValueError("sortino undefined: downside deviation is zero")
-    numerator = float(np.mean(excess)) * _MONTHS_PER_YEAR
+    numerator = float(np.mean(excess)) * rs.frequency.periods_per_year
     return numerator / downside
 
 
@@ -136,5 +136,5 @@ def calmar(rs: ReturnSeries) -> float:
         return float("nan")
     n = len(values)
     total_growth = float(np.prod(1.0 + values))
-    annualised_return = float(total_growth ** (_MONTHS_PER_YEAR / n)) - 1.0
+    annualised_return = float(total_growth ** (rs.frequency.periods_per_year / n)) - 1.0
     return annualised_return / abs(max_dd)

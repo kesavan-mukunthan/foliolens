@@ -1,12 +1,12 @@
-"""Calendar-derived month-end resampling — the successor to ``NavSeries.month_end``.
+"""Calendar-derived month-end resampling — the sole month-end rule.
 
-``NavSeries.month_end()`` (``model/value_objects.py``) picks the last NAV
-*present* in each calendar month, with no regard for whether that month's
-history is actually complete or whether the picked day was a real trading
-day. :func:`month_end` fixes both: a month is only emitted once its *next*
-month has begun publishing (no trailing partial month), and the emitted
-point is relabelled onto the true calendar month-end date so every emitted
-date is a genuine month-end, not whichever day happened to have a NAV.
+The former ``NavSeries.month_end()`` (deleted) picked the last NAV *present*
+in each calendar month, with no regard for whether that month's history was
+actually complete or whether the picked day was a real trading day.
+:func:`month_end` fixes both: a month is only emitted once its *next* month
+has begun publishing (no trailing partial month), and the emitted point is
+relabelled onto the true calendar month-end date so every emitted date is a
+genuine month-end, not whichever day happened to have a NAV.
 """
 from __future__ import annotations
 

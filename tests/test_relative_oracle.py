@@ -22,6 +22,7 @@ from scipy import stats
 from foliolens.analytics import relative as R
 from foliolens.analytics.series_ops import align
 from foliolens.model.value_objects import ReturnSeries
+from foliolens.returns.frequency import Frequency
 from fixtures import returns_series, rf_investment
 
 _REL = 1e-6
@@ -66,7 +67,7 @@ def test_beta_vs_oracle() -> None:
 
 def test_alpha_vs_oracle() -> None:
     fund, bench = _fund(), _bench()
-    rf = rf_investment().returns
+    rf = rf_investment().returns(Frequency.MONTHLY)
     r, rb = align(fund, bench)
     oracle = empyrical.alpha(r, rb, risk_free=_RF_MONTHLY, period="monthly")
     assert _rel_close(R.jensens_alpha(fund, bench, rf).alpha, float(oracle))
@@ -75,7 +76,7 @@ def test_alpha_vs_oracle() -> None:
 def test_alpha_tstat_vs_ols_oracle() -> None:
     # OLS of excess fund on excess benchmark; t-stat = intercept / intercept_stderr.
     fund, bench = _fund(), _bench()
-    rf = rf_investment().returns
+    rf = rf_investment().returns(Frequency.MONTHLY)
     r, rb = align(fund, bench)
     y = r - _RF_MONTHLY
     x = rb - _RF_MONTHLY
@@ -90,7 +91,7 @@ def test_alpha_tstat_vs_ols_oracle() -> None:
 def test_alpha_tstat_closed_form() -> None:
     # Fully hand-computed OLS SE (no scipy) — the fixture the spec names.
     fund, bench = _fund(), _bench()
-    rf = rf_investment().returns
+    rf = rf_investment().returns(Frequency.MONTHLY)
     r, rb = align(fund, bench)
     y = r - _RF_MONTHLY
     x = rb - _RF_MONTHLY

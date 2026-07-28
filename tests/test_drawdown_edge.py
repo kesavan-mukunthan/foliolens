@@ -21,7 +21,6 @@ from foliolens.analytics.drawdown import (
     var_historical,
 )
 from foliolens.model.value_objects import ReturnSeries
-from foliolens.returns.convert import to_returns
 from foliolens.returns.frequency import Frequency
 from fixtures import daily_shareclass
 
@@ -110,9 +109,8 @@ def test_intra_month_trough_captured_daily_not_month_end() -> None:
     # max_drawdown is fixed to the daily convention (spec-analytics): a
     # month-end series is rejected outright rather than silently smoothing
     # away the intra-month trough into a misleading zero drawdown.
-    month_end_series = to_returns(sc.source.nav.month_end(), frequency=Frequency.MONTHLY)
     with pytest.raises(ValueError, match="frequency"):
-        max_drawdown(month_end_series)
+        max_drawdown(sc.returns(Frequency.MONTHLY))
     assert daily.max_drawdown < -0.15
 
 

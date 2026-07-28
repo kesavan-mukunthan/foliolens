@@ -22,6 +22,8 @@ from foliolens.data_access import DataAccess
 from foliolens.ingest.land import land_index
 from foliolens.ingest.scheme_master import land_scheme_master, scheme_record
 from foliolens.model.investments import Benchmark, benchmark_from_index
+from foliolens.returns.calendar import calendar_from_dates
+from foliolens.returns.frequency import Frequency
 
 _BANDHAN = "118424"
 
@@ -202,10 +204,12 @@ def test_bandhan_resolves_to_benchmark_investment(tmp_path: Path) -> None:
 
     # Generic path — read benchmark_code off the row, build the Investment.
     code = rows[_BANDHAN]["benchmark_code"]
-    bench = benchmark_from_index(da.load_index_series(code))
+    levels = da.load_index_series(code)
+    cal = calendar_from_dates(d for d, _ in levels.data)
+    bench = benchmark_from_index(levels, cal)
     assert isinstance(bench, Benchmark)
     assert bench.id == "BSE500TRI"
-    assert bench.returns.values.dtype.name == "float64"
+    assert bench.returns(Frequency.MONTHLY).values.dtype.name == "float64"
 
 
 def _idx(code: str, d: date, level: str):  # type: ignore[no-untyped-def]

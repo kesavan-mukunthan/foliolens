@@ -162,8 +162,9 @@ class DataAccess:
         """Return the full daily level series for one benchmark index as a NavSeries.
 
         NavSeries is reused for index levels (the identifier field carries
-        ``index_code``); ``.month_end()`` and ``to_returns`` apply unchanged.
-        Reads decimal128 directly; no SQL arithmetic that would cast to DOUBLE.
+        ``index_code``); ``returns/monthly.monthly_returns`` and ``to_returns``
+        apply unchanged. Reads decimal128 directly; no SQL arithmetic that
+        would cast to DOUBLE.
         Raises ValueError if no data is found for index_code.
         """
         rows: list[Any] = self._con.execute(

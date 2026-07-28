@@ -11,7 +11,7 @@ from __future__ import annotations
 
 import math
 from collections import defaultdict
-from collections.abc import Sequence
+from collections.abc import Iterable, Sequence
 from dataclasses import dataclass
 from datetime import date
 
@@ -28,6 +28,18 @@ class TradingCalendar:
         """The latest trading day in ``year``/``month``, or ``None`` if none exist."""
         month_days = [d for d in self.days if d.year == year and d.month == month]
         return max(month_days) if month_days else None
+
+
+def calendar_from_dates(dates: Iterable[date]) -> TradingCalendar:
+    """A trading calendar over exactly ``dates`` — every date is a trading day.
+
+    For a single series considered alone (no other schemes to compare
+    against), this is exactly what :func:`derive_calendar` would produce: the
+    series is its own 100%-active, 100%-publishing universe. Used for a lone
+    index/synthetic series where deriving against a real cohort panel would
+    be either unavailable or (for a synthetic fixture) meaningless.
+    """
+    return TradingCalendar(days=frozenset(dates))
 
 
 def derive_calendar(panel: pa.Table, amfi_codes: Sequence[str]) -> TradingCalendar:
