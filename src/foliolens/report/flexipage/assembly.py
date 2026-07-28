@@ -31,6 +31,28 @@ daily-basis ``max_drawdown_SI`` already in ``metrics``). Both are derived
 straight through the existing ``returns/convert.to_index`` seam — no new
 spec-analytics metric convention, only a different base level and a longer
 (unwindowed) slice than the rolling panels use.
+
+Schema (``SCHEMA_VERSION = "flexipage-2"``): each fund entry gains a
+``windows`` block, one entry per trailing window (``"1Y"``/``"3Y"``/``"5Y"``,
+:func:`_window_disclosure`) — effective-n disclosure, never re-derived from
+NAV:
+
+* ``n_months`` — the fund's own trailing-window point count.
+* ``n_overlap_rf`` / ``n_overlap_benchmark`` — the post-``align`` pair count
+  a two-series metric over this window actually receives, computed over the
+  *same* panels the metrics themselves read
+  (:func:`~foliolens.analytics.series_ops.align_dated`). A gap between
+  ``n_months`` and an overlap count is the exact alignment shortfall a metric
+  silently absorbed — Phase A's alignment fix, restated as an ongoing,
+  checkable invariant rather than a one-off patch.
+* ``refused`` — ``{metric_name: reason}`` for every metric nulled by an
+  ``InsufficientHistoryError`` in this window (``analytics/series_ops.py``);
+  a null in the output is always attributable to a stated reason, never a
+  bare, unexplained ``None``.
+
+All three counts are ``0`` (not ``null``) when the window itself doesn't
+exist for this fund (history doesn't reach ``as_of`` with enough points) — a
+count of zero is the honest, explicit answer.
 """
 from __future__ import annotations
 
@@ -63,7 +85,9 @@ from foliolens.returns.engine import period_return
 from foliolens.returns.frequency import Frequency
 
 #: Artifact schema version for this page's durable output (``spec-flexicap-page §3``).
-SCHEMA_VERSION = "flexipage-1"
+#: Bumped to ``flexipage-2`` for the per-fund ``windows`` disclosure block
+#: (effective-n + refused, see the module docstring's *Schema* section).
+SCHEMA_VERSION = "flexipage-2"
 
 #: Calendar years rendered per fund (``spec-flexicap-page §2``).
 CALENDAR_YEARS: tuple[int, ...] = (2023, 2024, 2025)
@@ -320,6 +344,40 @@ class FundPanel:
     alpha: dict[str, dict[str, object] | None]
     rolling: dict[str, tuple[SeriesPoint, ...]]
     series: dict[str, object]
+    windows: dict[str, dict[str, object]]
+
+
+def _window_disclosure(
+    fund_rs: ReturnSeries,
+    rf_rs: ReturnSeries,
+    yardstick_rs: ReturnSeries,
+    months: int,
+    as_of: date,
+) -> dict[str, object]:
+    """Effective-n disclosure for one window: how many points a two-series
+    metric over this window actually had to work with, post-align.
+
+    ``n_months`` is the fund's own trailing-window point count;
+    ``n_overlap_rf`` / ``n_overlap_benchmark`` are the post-``align`` pair
+    counts :func:`~foliolens.analytics.series_ops.align_dated` actually hands
+    a two-series metric for this window — computed over the *same* panels
+    the metrics receive (never re-derived from NAV), so a gap between
+    ``n_months`` and an overlap count is the exact alignment shortfall a
+    metric silently absorbed. All zero when the window itself doesn't exist
+    (the fund's history doesn't reach ``as_of`` with ``months`` points) — a
+    count of zero is the honest answer, not a null.
+    """
+    sliced = trailing_anchored(fund_rs, months, as_of)
+    if sliced is None:
+        return {"n_months": 0, "n_overlap_rf": 0, "n_overlap_benchmark": 0, "refused": {}}
+    n_overlap_rf = len(align_dated(sliced, rf_rs)[0])
+    n_overlap_benchmark = len(align_dated(sliced, yardstick_rs)[0])
+    return {
+        "n_months": len(sliced),
+        "n_overlap_rf": n_overlap_rf,
+        "n_overlap_benchmark": n_overlap_benchmark,
+        "refused": {},
+    }
 
 
 def build_fund_panel(
@@ -396,6 +454,11 @@ def build_fund_panel(
         )
         alpha[f"alpha_{label}"] = _alpha_for_window(fund_rs, yardstick_rs, rf_rs, months, as_of)
 
+    windows = {
+        label: _window_disclosure(fund_rs, rf_rs, yardstick_rs, months, as_of)
+        for label, months in _RELATIVE_WINDOWS.items()
+    }
+
     return FundPanel(
         amfi_code=amfi_code,
         scheme_name=scheme_name,
@@ -408,6 +471,7 @@ def build_fund_panel(
         alpha=alpha,
         rolling=rolling,
         series=series,
+        windows=windows,
     )
 
 
@@ -567,6 +631,7 @@ def assemble_universe(
                 },
                 "series": p.series,
                 "ranks": fund_ranks,
+                "windows": p.windows,
                 "commentary": None,
             }
         )
