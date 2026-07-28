@@ -81,6 +81,32 @@ def align(
     return a_vals, b_vals
 
 
+def trailing_anchored(rs: ReturnSeries, periods: int, as_of: date) -> ReturnSeries | None:
+    """The trailing ``periods``-window of ``rs`` ending exactly at ``as_of``.
+
+    ``None`` when ``as_of`` is absent from ``rs.dates`` — the series does not
+    reach the shared anchor date (a stale fund lagging the rest of a cohort) —
+    or when fewer than ``periods`` points precede it. This is the null path a
+    caller must take instead of silently falling back to ``rs``'s own last
+    date: a common cross-sectional ``as_of`` only stays comparable across
+    funds if every window is measured to the *same* end date, not each
+    fund's own.
+    """
+    try:
+        end_i = rs.dates.index(as_of)
+    except ValueError:
+        return None
+    if end_i + 1 < periods:
+        return None
+    lo = end_i + 1 - periods
+    return ReturnSeries(
+        dates=rs.dates[lo : end_i + 1],
+        values=rs.values[lo : end_i + 1],
+        frequency=rs.frequency,
+        base=rs.base,
+    )
+
+
 def between(rs: ReturnSeries, start: date, end: date) -> ReturnSeries:
     """Slice ``rs`` to the window ``[start, end]`` inclusive (searchsorted).
 

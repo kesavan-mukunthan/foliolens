@@ -42,9 +42,11 @@ from foliolens.benchmark_map import (
 )
 from foliolens.data_access import DATA_DIR_ENV_VAR, DataAccess, default_data_dir
 from foliolens.ingest.iima import rf_investment
-from foliolens.model.investments import Benchmark, ShareClass, benchmark_from_index
-from foliolens.model.sources import PricedSource
+from foliolens.model.investments import Benchmark, ShareClass, benchmark_from_index, share_class_from_nav
 from foliolens.model.value_objects import NavSeries
+from foliolens.returns.calendar import TradingCalendar, calendar_from_dates
+from foliolens.returns.frequency import Frequency
+from foliolens.returns.monthly import month_end
 
 from .assembly import FundPanel, assemble_universe, build_fund_panel
 from .commentary import PROMPT_VERSION
@@ -88,7 +90,11 @@ def _validate_index_series(index_code: str, series: NavSeries) -> None:
 
     Walks the series once point-to-point (never resampled/smoothed away), so
     a single corrupted row at any interior position is caught even though
-    both its neighbours look individually plausible.
+    both its neighbours look individually plausible. The month-over-month leg
+    derives its own single-series calendar off ``series``' own dates — this is
+    a pre-computation data-quality gate on the index alone, decoupled from the
+    equity cohort's shared calendar (which the index's Benchmark panel uses
+    once it is actually constructed).
     """
     data = series.data
     for (prev_date, prev_level), (curr_date, curr_level) in zip(data, data[1:]):
@@ -102,7 +108,7 @@ def _validate_index_series(index_code: str, series: NavSeries) -> None:
                 f"{curr_level}) exceeds the ±{DAY_OVER_DAY_MAX_ABS_CHANGE:.0%} guard"
             )
 
-    month_ends = series.month_end().data
+    month_ends = month_end(series, calendar_from_dates(d for d, _ in data)).data
     for (prev_date, prev_level), (curr_date, curr_level) in zip(
         month_ends, month_ends[1:]
     ):
@@ -171,20 +177,19 @@ def load_universe(
     return master.filter(mask)
 
 
-def _build_fund_investment(data_access: DataAccess, amfi_code: str) -> ShareClass:
-    """One fund's Investment off stored NAV — the existing engine seam.
+def _build_fund_investment(
+    data_access: DataAccess, amfi_code: str, cal: TradingCalendar
+) -> ShareClass:
+    """One fund's Investment off stored NAV, panels built eagerly via ``cal``.
 
-    ``isin`` is not carried by ``scheme_master`` (spec-benchmarks §1's derived
+    ``cal`` is the one equity-cohort calendar derived once per run and shared
+    across every fund (and the benchmark) — never derived per fund. ``isin``
+    is not carried by ``scheme_master`` (spec-benchmarks §1's derived
     columns); left blank rather than fabricated. Not consumed by any metric.
     """
     nav = data_access.load_nav_series(amfi_code)
-    return ShareClass(
-        id=amfi_code,
-        amfi_code=amfi_code,
-        isin="",
-        plan="direct",
-        option="growth",
-        source=PricedSource(nav=nav),
+    return share_class_from_nav(
+        amfi_code, nav, cal, isin="", plan="direct", option="growth"
     )
 
 
@@ -202,8 +207,15 @@ def _index_landed(data_access: DataAccess, index_code: str) -> bool:
     return True
 
 
-def _build_benchmark(data_access: DataAccess, index_code: str) -> Benchmark:
-    return benchmark_from_index(_load_index_series_checked(data_access, index_code))
+def _build_benchmark(
+    data_access: DataAccess, index_code: str, cal: TradingCalendar
+) -> Benchmark:
+    """The category yardstick's Investment, panels built off the same ``cal``
+    as every fund — so the benchmark's monthly panel lands on the exact same
+    calendar month-ends as the funds it is compared against (required for
+    :func:`~foliolens.analytics.series_ops.align_dated` to find an overlap).
+    """
+    return benchmark_from_index(_load_index_series_checked(data_access, index_code), cal)
 
 
 def _carry_forward_commentary(artifact: dict[str, Any], previous_path: Path) -> int:
@@ -245,11 +257,18 @@ def run(
 ) -> BuildSummary:
     """Run the F1 batch end to end and write ``metrics.json``.
 
-    ``as_of`` defaults to the latest last-available-NAV date across the
-    successfully-loaded cohort, so every fund's trailing/rolling windows
-    anchor to the same date (required for cross-sectional ranks to be
-    comparable). Raises if the universe is empty or failures exceed
-    :data:`MAX_FAILURE_RATE` of the cohort.
+    ``as_of`` defaults to the latest calendar month-end emitted by at least
+    half of the successfully-loaded cohort's MONTHLY panels (never a raw
+    last-NAV date, and never per-fund) — the shared anchor every fund's
+    fixed-window metrics (sub-year returns, YTD, 1Y/3Y/5Y) are measured
+    against (``spec-analytics``: common anchoring). A fund whose panel does
+    not reach that date emits ``null`` for those metrics rather than
+    silently falling back to its own last month — see
+    ``analytics.artifact.build_metrics`` and
+    ``report.flexipage.assembly._relative_scalar`` /
+    ``_alpha_for_window``, which apply the anchor. Raises if the universe is
+    empty, no fund loads, no month-end reaches the 50% threshold, or
+    failures exceed :data:`MAX_FAILURE_RATE` of the cohort.
 
     ``carry_commentary_path``, when given, points at a previous build's
     ``metrics.json``; matching-version commentary blocks are copied onto the
@@ -264,26 +283,42 @@ def run(
     if total == 0:
         raise ValueError(f"empty {CATEGORY!r} universe — nothing to build")
 
+    # One equity-cohort trading calendar for the whole run — derived once over
+    # every fund in the universe, then passed unchanged to every factory call
+    # (funds and the benchmark alike). Never derived per fund.
+    cohort_codes = [row["amfi_code"] for row in rows]
+    cal = data_access.derive_trading_calendar(cohort_codes)
+
     rf = rf_investment(rf_path)
     yardstick_code = CATEGORY_YARDSTICK[CATEGORY]
-    yardstick = _build_benchmark(data_access, yardstick_code)
+    yardstick = _build_benchmark(data_access, yardstick_code, cal)
 
     failures: list[FundLoadFailure] = []
     loaded: list[tuple[dict[str, Any], ShareClass]] = []
     for row in rows:
         amfi_code = row["amfi_code"]
         try:
-            fund = _build_fund_investment(data_access, amfi_code)
+            fund = _build_fund_investment(data_access, amfi_code, cal)
         except Exception as exc:  # noqa: BLE001 - collected, reported, never swallowed
             failures.append(FundLoadFailure(amfi_code, row["scheme_name"], repr(exc)))
             continue
         loaded.append((row, fund))
 
     if as_of is None:
-        last_dates = [fund.source.value_series.data[-1][0] for _, fund in loaded]
-        if not last_dates:
+        if not loaded:
             raise ValueError("no fund loaded successfully — cannot infer as_of")
-        as_of = max(last_dates)
+        month_end_counts: dict[date, int] = {}
+        for _, fund in loaded:
+            for d in fund.returns(Frequency.MONTHLY).dates:
+                month_end_counts[d] = month_end_counts.get(d, 0) + 1
+        threshold = 0.5 * len(loaded)
+        qualifying = [d for d, count in month_end_counts.items() if count >= threshold]
+        if not qualifying:
+            raise ValueError(
+                "no calendar month-end is emitted by >= 50% of the loaded cohort "
+                "— cannot infer as_of"
+            )
+        as_of = max(qualifying)
 
     tier1_landed_cache: dict[str, bool] = {}
     panels: list[FundPanel] = []

@@ -52,7 +52,7 @@ from foliolens.analytics import relative as relative_metrics
 from foliolens.analytics.drawdown import underwater
 from foliolens.analytics.metrics import period_return_abs
 from foliolens.analytics.relative import RELATIVE_ROLLING_WINDOWS, rolling_excess_return
-from foliolens.analytics.series_ops import align_dated, between
+from foliolens.analytics.series_ops import align_dated, between, trailing_anchored
 from foliolens.benchmark_map import TIER1
 from foliolens.model.investments import Investment
 from foliolens.model.sources import ReturnSource
@@ -138,16 +138,6 @@ def _safe_float(value: float) -> float | None:
     return value if math.isfinite(value) else None
 
 
-def _trailing(rs: ReturnSeries, months: int) -> ReturnSeries | None:
-    """The last ``months`` points of ``rs``; ``None`` if the fund is too young."""
-    if len(rs) < months:
-        return None
-    lo = len(rs) - months
-    return ReturnSeries(
-        dates=rs.dates[lo:], values=rs.values[lo:], frequency=rs.frequency, base=rs.base
-    )
-
-
 def _engine_return(source: ReturnSource, period: str, as_of: date) -> float | None:
     """One trailing figure of record via the return engine; ``None`` if undefined."""
     try:
@@ -193,9 +183,14 @@ def _relative_scalar(
     fund_rs: ReturnSeries,
     yardstick_rs: ReturnSeries,
     months: int,
+    as_of: date,
 ) -> float | None:
-    """Apply a §6 two-series pure function to the fund's trailing ``months`` slice."""
-    sliced = _trailing(fund_rs, months)
+    """Apply a §6 two-series pure function to the fund's ``months``-window
+    ending exactly at ``as_of`` (common anchoring, ``spec-analytics``) — null
+    when the fund's panel does not reach ``as_of``, never a silent fall-back
+    to the fund's own last month.
+    """
+    sliced = trailing_anchored(fund_rs, months, as_of)
     if sliced is None:
         return None
     try:
@@ -210,13 +205,15 @@ def _alpha_for_window(
     yardstick_rs: ReturnSeries,
     rf_rs: ReturnSeries,
     months: int,
+    as_of: date,
 ) -> dict[str, object] | None:
-    """Jensen's alpha over the fund's trailing ``months`` slice, with t-stat + window.
+    """Jensen's alpha over the fund's ``months``-window ending exactly at
+    ``as_of`` (common anchoring), with t-stat + window.
 
     Never a naked point estimate (``CLAUDE.md``): value, t-stat, n and the
     estimation window travel together, or the whole object is ``None``.
     """
-    sliced = _trailing(fund_rs, months)
+    sliced = trailing_anchored(fund_rs, months, as_of)
     if sliced is None:
         return None
     try:
@@ -340,7 +337,7 @@ def build_fund_panel(
 ) -> FundPanel:
     """Assemble one fund's panel: the §5 artifact extended with flexipage fields.
 
-    ``fund.returns`` is read once here (and once more inside ``build_metrics``,
+    ``fund.returns(Frequency.MONTHLY)`` is read once here (and once more inside ``build_metrics``,
     which is the artifact's own single-read contract); every figure beyond that
     delegates to an existing pure function over a trailing slice — no arithmetic
     is invented in this function.
@@ -356,9 +353,9 @@ def build_fund_panel(
     metrics = dict(mr.metrics)
     rolling = dict(mr.series)
 
-    fund_rs = fund.returns
-    yardstick_rs = yardstick.returns
-    rf_rs = rf.returns
+    fund_rs = fund.returns(Frequency.MONTHLY)
+    yardstick_rs = yardstick.returns(Frequency.MONTHLY)
+    rf_rs = rf.returns(Frequency.MONTHLY)
 
     for label, months in RELATIVE_ROLLING_WINDOWS.items():
         panel = rolling_excess_return(fund_rs, yardstick_rs, months)
@@ -383,15 +380,15 @@ def build_fund_panel(
             fund.source, yardstick.source, label, as_of
         )
         metrics[f"tracking_error_{label}"] = _relative_scalar(
-            relative_metrics.tracking_error, fund_rs, yardstick_rs, months
+            relative_metrics.tracking_error, fund_rs, yardstick_rs, months, as_of
         )
         metrics[f"information_ratio_{label}"] = _relative_scalar(
-            relative_metrics.information_ratio, fund_rs, yardstick_rs, months
+            relative_metrics.information_ratio, fund_rs, yardstick_rs, months, as_of
         )
         metrics[f"beta_{label}"] = _relative_scalar(
-            relative_metrics.beta, fund_rs, yardstick_rs, months
+            relative_metrics.beta, fund_rs, yardstick_rs, months, as_of
         )
-        alpha[f"alpha_{label}"] = _alpha_for_window(fund_rs, yardstick_rs, rf_rs, months)
+        alpha[f"alpha_{label}"] = _alpha_for_window(fund_rs, yardstick_rs, rf_rs, months, as_of)
 
     return FundPanel(
         amfi_code=amfi_code,
