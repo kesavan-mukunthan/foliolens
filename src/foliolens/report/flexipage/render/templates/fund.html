@@ -30,14 +30,15 @@
       <td>Alpha (t-stat)</td>
       {% for w in windows %}
       {% set a = alpha_row[w] %}
-      <td class="{{ 'greyed' if a and a.greyed else '' }}">
-        {%- if a %}{{ a.value|pct }} (t={{ a.t_stat|num }}){% else %}—{% endif -%}
+      <td class="{{ 'greyed' if a and a.greyed and not a.suppressed else '' }}">
+        {%- if a and a.suppressed %}—<sup class="fn-ref">‡</sup>{% elif a %}{{ a.value|pct }} (t={{ a.t_stat|num }}){% else %}—{% endif -%}
       </td>
       {% endfor %}
     </tr>
     <tr><td>Max Drawdown (SI)</td><td colspan="3">{{ fund.metrics.max_drawdown_SI|pct }}</td></tr>
   </tbody>
 </table>
+{% if alpha_suppressed %}<p class="fn-note" id="tstat-note"><sup class="fn-ref">‡</sup> Alpha t-stat {{ t_stat_suppression_footnote }}</p>{% endif %}
 
 <h2>Calendar Year Returns</h2>
 <table>

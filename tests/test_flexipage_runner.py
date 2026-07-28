@@ -39,7 +39,7 @@ from foliolens.report.flexipage.runner import (
 from foliolens.data_access import DataAccess
 from foliolens.returns.monthly import monthly_returns
 
-SCHEMA_PATH = Path(__file__).parent.parent / "schemas" / "flexipage-2.schema.json"
+SCHEMA_PATH = Path(__file__).parent.parent / "schemas" / "flexipage-3.schema.json"
 
 _START = date(2018, 6, 30)
 _MATURE_DAYS = 8 * 365  # ~8 years daily -> 96 monthly points; full 5Y panels
@@ -220,10 +220,29 @@ def test_every_universe_fund_present(artifact: dict[str, Any]) -> None:
 
 
 def test_schema_version_and_yardstick(artifact: dict[str, Any]) -> None:
-    assert artifact["schema_version"] == "flexipage-2"
+    assert artifact["schema_version"] == "flexipage-3"
     assert artifact["universe"]["yardstick"] == "NIFTY500TRI"
     for f in artifact["funds"]:
         assert f["benchmark"]["yardstick"] == "NIFTY500TRI"
+
+
+def test_rf_disclosure_block_populated(artifact: dict[str, Any]) -> None:
+    """D2d: the real build populates ``universe.rf`` off the rf Investment and
+    its own series — identity fields plus an annualised level per rendered
+    window (all present on this mature fixture, whose rf reaches as_of).
+    """
+    rf = artifact["universe"]["rf"]
+    assert rf["series_name"] == "rf-iima-91d-tbill"
+    assert rf["frequency"] == "monthly"
+    assert rf["last_date"] is not None
+    assert set(rf["levels"]) == {"1Y", "3Y", "5Y"}
+    assert all(rf["levels"][w] is not None for w in ("1Y", "3Y", "5Y"))
+    # rf disclosed per window == the per-fund rf_{window} metric it was measured
+    # against (same _rf_return_scalar pathway), so the footer cannot drift from
+    # the metrics it annotates.
+    for fund in artifact["funds"]:
+        for w in ("1Y", "3Y", "5Y"):
+            assert rf["levels"][w] == fund["metrics"][f"rf_{w}"]
 
 
 # ---------------------------------------------------------------------------

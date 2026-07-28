@@ -86,9 +86,15 @@ from foliolens.returns.engine import period_return
 from foliolens.returns.frequency import Frequency
 
 #: Artifact schema version for this page's durable output (``spec-flexicap-page §3``).
-#: Bumped to ``flexipage-2`` for the per-fund ``windows`` disclosure block
-#: (effective-n + refused, see the module docstring's *Schema* section).
-SCHEMA_VERSION = "flexipage-2"
+#: ``flexipage-2`` added the per-fund ``windows`` disclosure block (effective-n
+#: + refused). ``flexipage-3`` adds the universe-level ``rf`` disclosure block
+#: (:func:`build_rf_disclosure`) — the risk-free series' identity plus its
+#: annualised level per rendered window, so the page footer can state the rf
+#: basis every Sharpe/Sortino/alpha was computed against (D2d). A presentation-
+#: driven schema addition only — no metric changes; the per-window rf level
+#: reuses the existing ``_rf_return_scalar`` pathway that already backs the
+#: per-fund ``rf_{window}`` metric.
+SCHEMA_VERSION = "flexipage-3"
 
 #: Calendar years rendered per fund (``spec-flexicap-page §2``).
 CALENDAR_YEARS: tuple[int, ...] = (2023, 2024, 2025)
@@ -540,6 +546,32 @@ def _rf_return_scalar(rf_rs: ReturnSeries, months: int, as_of: date) -> float | 
     return _safe_float(float(panel.values[idx]))
 
 
+def build_rf_disclosure(rf: Investment, as_of: date) -> dict[str, object]:
+    """The universe-level risk-free disclosure block (D2d, ``flexipage-3``).
+
+    Everything is read off the rf ``Investment`` and its own series (nothing
+    hardcoded): ``series_name`` is the rf id, ``frequency`` its panel's
+    frequency, ``last_date`` the last observation in the panel. ``levels`` is
+    the annualised rf rate at each rendered window (``_RELATIVE_WINDOWS``),
+    computed through the *same* :func:`_rf_return_scalar` pathway that already
+    backs the per-fund ``rf_{window}`` metric — so the disclosed level is
+    exactly the rf level the window's metrics were measured against, not a
+    separately-derived figure. A window's level is ``None`` when rf's history
+    does not reach ``as_of`` for it.
+    """
+    rf_rs = rf.returns(Frequency.MONTHLY)
+    last_date = rf_rs.dates[-1].isoformat() if rf_rs.dates else None
+    return {
+        "series_name": rf.id,
+        "frequency": rf_rs.frequency.value,
+        "last_date": last_date,
+        "levels": {
+            label: _rf_return_scalar(rf_rs, months, as_of)
+            for label, months in _RELATIVE_WINDOWS.items()
+        },
+    }
+
+
 def _metric_value(panel: FundPanel, key: str) -> float | None:
     """The cross-sectional value for one metric-window: flat metric or alpha.value."""
     if key.startswith("alpha_"):
@@ -572,7 +604,12 @@ def _to_display_pct(pct: float, n_ranked: int) -> float:
 
 
 def assemble_universe(
-    panels: list[FundPanel], *, as_of: date, category: str, yardstick_code: str
+    panels: list[FundPanel],
+    *,
+    as_of: date,
+    category: str,
+    yardstick_code: str,
+    rf_disclosure: dict[str, object],
 ) -> dict[str, object]:
     """The §7 cross-section over every panel, plus the full ``metrics.json`` shape.
 
@@ -581,6 +618,9 @@ def assemble_universe(
     §7 deliberately stays blind to (it never knows this is "flexicap"). Every
     written ``pct`` (latest and history) is then flipped to the display
     convention (:func:`_to_display_pct`) — lower is better, 1 ≈ top of cohort.
+
+    ``rf_disclosure`` (from :func:`build_rf_disclosure`) is embedded verbatim
+    under ``universe.rf`` — the risk-free basis the page footer discloses (D2d).
     """
     ranks: dict[str, dict[str, float | None]] = {}
     histories: dict[str, dict[str, ReturnSeries]] = {}
@@ -674,6 +714,7 @@ def assemble_universe(
             "count": len(panels),
             "yardstick": yardstick_code,
             "aggregates": aggregates,
+            "rf": rf_disclosure,
         },
         "funds": funds_out,
     }

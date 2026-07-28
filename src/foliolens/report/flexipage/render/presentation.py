@@ -34,6 +34,35 @@ _METRIC_ROWS: tuple[tuple[str, str, bool, bool], ...] = (
 #: each window's Return and Excess Return (Return, Benchmark, Excess).
 BENCHMARK_RETURN_LABEL = "Benchmark Return"
 
+#: Metric-name prefixes whose figures are dimensionless *ratios* — rendered as
+#: a plain 2 dp number, never a percentage. Sharpe/Sortino/Calmar (return per
+#: unit of risk), Information Ratio (active return per unit of tracking error),
+#: and Beta (regression slope) are all unitless; multiplying them by 100 and
+#: appending "%" (as a naive return-style formatter does) is a category error —
+#: a Sharpe of 1.20 is not "120%". Everything else rendered in a metric table
+#: is a percentage-class figure (returns, volatility, downside deviation, alpha,
+#: tracking error, drawdown). This is the single source of truth the per-fund
+#: metric rows (:data:`_METRIC_ROWS`) and the index-page aggregate rows
+#: (:func:`build_aggregate_rows`) both classify against.
+_RATIO_METRIC_PREFIXES: tuple[str, ...] = (
+    "sharpe",
+    "sortino",
+    "calmar",
+    "information_ratio",
+    "beta",
+)
+
+
+def is_ratio_metric(metric_key: str) -> bool:
+    """Whether ``metric_key`` (with or without a ``_1Y``/``_3Y``/``_5Y`` window
+    suffix) names a dimensionless ratio — rendered as a plain number, not a
+    percentage. See :data:`_RATIO_METRIC_PREFIXES`.
+    """
+    return any(
+        metric_key == prefix or metric_key.startswith(f"{prefix}_")
+        for prefix in _RATIO_METRIC_PREFIXES
+    )
+
 
 def _benchmark_return(metrics: dict[str, Any], window: str) -> float | None:
     """The category benchmark's own trailing return for ``window``.
@@ -55,6 +84,14 @@ def _benchmark_return(metrics: dict[str, Any], window: str) -> float | None:
 
 #: |t-stat| below this greys the alpha figure out (``spec-flexicap-page §2``).
 ALPHA_T_STAT_GREY_THRESHOLD = 2.0
+
+#: Minimum monthly observations in a window for its t-statistic to be shown
+#: (D2c). A window with fewer points yields a t-stat too thin to report: the
+#: whole alpha cell is suppressed (rendered as an em dash, its value never
+#: emitted). Read against the artifact's per-window ``n_months`` — never
+#: inferred from the window label (a 1Y window has ~12 points, so its alpha
+#: t-stat is legitimately suppressed; 3Y/5Y clear the bar).
+T_STAT_MIN_MONTHS = 24
 
 #: The single mid-horizon window used for the index page's ranked table's
 #: standalone (non-paired) columns (vol/Sharpe/rank) — 3Y is the window with
@@ -107,6 +144,7 @@ class AlphaCell:
     value: float
     t_stat: float
     greyed: bool
+    suppressed: bool
 
 
 def build_metrics_rows(metrics: dict[str, Any]) -> list[MetricRow]:
@@ -136,8 +174,35 @@ def build_metrics_rows(metrics: dict[str, Any]) -> list[MetricRow]:
     return rows
 
 
-def build_alpha_row(alpha: dict[str, Any]) -> dict[str, AlphaCell | None]:
-    """Jensen's alpha per window, greyed when ``|t_stat| < 2`` (never a naked point estimate)."""
+def _window_n_months(windows: dict[str, Any], window: str) -> int | None:
+    """This window's ``n_months`` from the artifact's per-window block, or
+    ``None`` when the block is absent (a pre-``windows`` artifact) — never
+    inferred from the window label (D2c). A ``None`` means "cannot confirm the
+    sample size", which the caller treats as suppressing rather than trusting.
+    """
+    entry = windows.get(window)
+    if not isinstance(entry, dict):
+        return None
+    n = entry.get("n_months")
+    return int(n) if isinstance(n, int) else None
+
+
+def build_alpha_row(
+    alpha: dict[str, Any], windows: dict[str, Any]
+) -> dict[str, AlphaCell | None]:
+    """Jensen's alpha per window: greyed when ``|t_stat| < 2`` (never a naked
+    point estimate), and *suppressed* when the window's ``n_months`` is below
+    :data:`T_STAT_MIN_MONTHS` (D2c).
+
+    Suppression withholds the entire cell — both the alpha and its t-stat — not
+    just the t-stat: a point estimate whose uncertainty is too thin to state is
+    dropped rather than shown naked (``CLAUDE.md``: "uncertainty attaches to
+    numbers or decimals are dropped"). The template renders such a cell as an em
+    dash; the value never reaches the HTML (including any title/tooltip). The
+    sample size is read from ``windows[w]["n_months"]`` — never inferred from
+    the window label; a missing per-window block suppresses (the size cannot be
+    confirmed).
+    """
     row: dict[str, AlphaCell | None] = {}
     for w in WINDOWS:
         entry = alpha.get(f"alpha_{w}")
@@ -145,10 +210,13 @@ def build_alpha_row(alpha: dict[str, Any]) -> dict[str, AlphaCell | None]:
             row[w] = None
             continue
         t_stat = float(entry["t_stat"])
+        n_months = _window_n_months(windows, w)
+        suppressed = n_months is None or n_months < T_STAT_MIN_MONTHS
         row[w] = AlphaCell(
             value=float(entry["value"]),
             t_stat=t_stat,
             greyed=abs(t_stat) < ALPHA_T_STAT_GREY_THRESHOLD,
+            suppressed=suppressed,
         )
     return row
 
@@ -227,13 +295,20 @@ def build_index_rows(funds: list[dict[str, Any]]) -> list[IndexRow]:
 class AggregateRow:
     key: str
     label: str
+    is_pct: bool
     median: float | None
     q1: float | None
     q3: float | None
 
 
 def build_aggregate_rows(aggregates: dict[str, Any]) -> list[AggregateRow]:
-    """Category median/q1/q3 for the curated :data:`INDEX_AGGREGATE_KEYS` subset."""
+    """Category median/q1/q3 for the curated :data:`INDEX_AGGREGATE_KEYS` subset.
+
+    ``is_pct`` is ``False`` for a dimensionless ratio (Sharpe, and any other
+    :func:`is_ratio_metric` key) so the template renders it as a plain 2 dp
+    number, not a percentage — the aggregate table previously applied ``|pct``
+    uniformly, printing a Sharpe median as e.g. "120.00%" (the D2a defect).
+    """
     rows = []
     for key in INDEX_AGGREGATE_KEYS:
         agg = aggregates.get(key, {})
@@ -241,6 +316,7 @@ def build_aggregate_rows(aggregates: dict[str, Any]) -> list[AggregateRow]:
             AggregateRow(
                 key=key,
                 label=key.replace("_", " "),
+                is_pct=not is_ratio_metric(key),
                 median=agg.get("median"),
                 q1=agg.get("q1"),
                 q3=agg.get("q3"),

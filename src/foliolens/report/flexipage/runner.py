@@ -49,7 +49,12 @@ from foliolens.returns.frequency import Frequency
 from foliolens.returns.monthly import month_end
 from foliolens.validation.identities import IdentityViolation, check_identities
 
-from .assembly import FundPanel, assemble_universe, build_fund_panel
+from .assembly import (
+    FundPanel,
+    assemble_universe,
+    build_fund_panel,
+    build_rf_disclosure,
+)
 from .commentary import PROMPT_VERSION
 
 _LOG = logging.getLogger(__name__)
@@ -385,7 +390,11 @@ def run(
         )
 
     artifact = assemble_universe(
-        panels, as_of=as_of, category=CATEGORY, yardstick_code=yardstick_code
+        panels,
+        as_of=as_of,
+        category=CATEGORY,
+        yardstick_code=yardstick_code,
+        rf_disclosure=build_rf_disclosure(rf, as_of),
     )
 
     violations: list[IdentityViolation] = []
