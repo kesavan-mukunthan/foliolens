@@ -1,9 +1,9 @@
 """§5 metrics artifact — the durable, versioned per-fund output contract.
 
 ``MetricsResult`` is the value object the analytics layer emits for one
-investment: ``{metadata, metrics, series}`` under a ``schema_version``. It is the
-seam the disposable renderer (``spec-flexicap-page``) and, later, spec-api
-consume — shaped as the eventual API payload, not a rendering.
+investment: ``{metadata, metrics, series, refused}`` under a ``schema_version``.
+It is the seam the disposable renderer (``spec-flexicap-page``) and, later,
+spec-api consume — shaped as the eventual API payload, not a rendering.
 
 Shape (the *generic* contract; ``spec-flexicap-page §3`` is the first consumer):
 
@@ -15,6 +15,13 @@ Shape (the *generic* contract; ``spec-flexicap-page §3`` is the first consumer)
   not exceptions.
 * ``series`` — rolling panels, one per ``panel_name``, each a list of
   ``{date, value}`` points stamped at the window-end month-end (ISO-8601 dates).
+* ``refused`` — a **flat** ``{metric_window: reason}`` map, one entry for every
+  ``metrics`` key that came out ``null`` because its underlying pure function
+  raised ``InsufficientHistoryError`` (``analytics/series_ops.py``) — e.g.
+  ``"insufficient_history(required=36, available=14)"``. Every other cause of
+  ``null`` (the window itself absent because ``as_of`` isn't reached, a
+  non-finite result) carries no ``refused`` entry — this map attributes only
+  the insufficient-history nulls, never every null in ``metrics``.
 * ``metadata`` — fund identity + ``as_of``; opaque to this layer.
 
 Serialisation is a pure ``to_dict`` / ``from_dict`` round-trip over JSON-native
@@ -54,10 +61,11 @@ from .metrics import (
     volatility,
 )
 from .rolling import rolling_returns
-from .series_ops import between, trailing_anchored
+from .series_ops import InsufficientHistoryError, between, trailing_anchored
 
 #: Artifact schema version — bump on any breaking shape change to ``to_dict``.
-SCHEMA_VERSION = "analytics-1"
+#: Bumped to ``analytics-2`` for the ``refused`` field (B3: attributable nulls).
+SCHEMA_VERSION = "analytics-2"
 
 #: Trailing / rolling window labels → length in months. ``SI`` (since inception)
 #: is the whole available series and carries no fixed month count.
@@ -96,6 +104,7 @@ class MetricsResult:
     metadata: Mapping[str, Any]
     metrics: Mapping[str, float | None]
     series: Mapping[str, tuple[SeriesPoint, ...]]
+    refused: Mapping[str, str]
 
     def to_dict(self) -> dict[str, Any]:
         """JSON-native nested dict; deterministic (insertion-ordered) across runs."""
@@ -107,6 +116,7 @@ class MetricsResult:
                 name: [p.to_dict() for p in points]
                 for name, points in self.series.items()
             },
+            "refused": dict(self.refused),
         }
 
     @classmethod
@@ -119,22 +129,38 @@ class MetricsResult:
                 name: tuple(SeriesPoint.from_dict(p) for p in points)
                 for name, points in d["series"].items()
             },
+            refused=dict(d.get("refused", {})),
         )
 
 
-def _null_safe(fn: Callable[[], float]) -> float | None:
-    """Run a metric, mapping insufficient-history / absent-source / non-finite → ``None``.
+def _null_safe(
+    fn: Callable[[], float],
+    *,
+    metric: str | None = None,
+    refused: dict[str, str] | None = None,
+) -> float | None:
+    """Run a metric, mapping ``InsufficientHistoryError`` → ``None`` — nothing else.
 
-    Insufficient history surfaces as ``ValueError`` from the pure functions;
-    a missing daily NAV source (``SeriesInvestment``) surfaces as
-    ``NotImplementedError``. Both mean "no value to report" → explicit ``null``,
-    never a raised error (``spec-analytics §5`` null-propagation). A non-finite
-    result (e.g. Calmar with no drawdown → NaN) is also reported as ``null`` so
-    the artifact stays valid JSON without relying on ``allow_nan``.
+    Only insufficient history is a valid null path (``spec-analytics §5``
+    null-propagation): a bare ``ValueError`` (frequency mismatch, a
+    degenerate zero-variance input) or a ``NotImplementedError`` (no NAV
+    source) is a genuine failure and propagates uncaught, never silently
+    swallowed — a null in the output must always trace to a stated
+    insufficient-history reason. A non-finite result (e.g. Calmar with no
+    drawdown → NaN) is also reported as ``null`` so the artifact stays valid
+    JSON without relying on ``allow_nan``.
+
+    When ``metric``/``refused`` are supplied, the shortfall is recorded as
+    ``refused[metric] = "insufficient_history(required=…, available=…)"`` —
+    the flexipage layer's per-window ``refused`` disclosure reads this map.
     """
     try:
         value = fn()
-    except (ValueError, NotImplementedError):
+    except InsufficientHistoryError as exc:
+        if metric is not None and refused is not None:
+            refused[metric] = (
+                f"insufficient_history(required={exc.required}, available={exc.available})"
+            )
         return None
     if not math.isfinite(value):
         return None
@@ -194,14 +220,19 @@ def build_metrics(
         meta.update(metadata)
 
     metrics_map: dict[str, float | None] = {}
+    refused: dict[str, str] = {}
 
     # Sub-year period returns (absolute, compounded over the monthly series).
     for label, months in _PERIOD_MONTHS.items():
         metrics_map[f"return_{label}"] = _on(
             trailing_anchored(rs, months, anchor) if anchor is not None else None,
             lambda s: period_return_abs(s, s.dates[0], s.dates[-1]),
+            metric=f"return_{label}",
+            refused=refused,
         )
-    metrics_map["return_YTD"] = _ytd_return(rs, anchor) if anchor is not None else None
+    metrics_map["return_YTD"] = (
+        _ytd_return(rs, anchor, refused=refused) if anchor is not None else None
+    )
 
     # Windowed risk / risk-adjusted metrics: trailing 1Y/3Y/5Y (anchored) +
     # since-inception (never anchored, see docstring).
@@ -211,25 +242,52 @@ def build_metrics(
     }
     windows["SI"] = rs if len(rs) else None
     for label, w in windows.items():
-        metrics_map[f"volatility_{label}"] = _on(w, lambda s: volatility(s))
-        metrics_map[f"downside_deviation_{label}"] = _on(
-            w, lambda s: downside_deviation(s, rf_rs)
+        metrics_map[f"volatility_{label}"] = _on(
+            w, lambda s: volatility(s), metric=f"volatility_{label}", refused=refused
         )
-        metrics_map[f"sharpe_{label}"] = _on(w, lambda s: sharpe(s, rf_rs))
-        metrics_map[f"sortino_{label}"] = _on(w, lambda s: sortino(s, rf_rs))
-        metrics_map[f"calmar_{label}"] = _on(w, lambda s: calmar(s))
+        metrics_map[f"downside_deviation_{label}"] = _on(
+            w,
+            lambda s: downside_deviation(s, rf_rs),
+            metric=f"downside_deviation_{label}",
+            refused=refused,
+        )
+        metrics_map[f"sharpe_{label}"] = _on(
+            w, lambda s: sharpe(s, rf_rs), metric=f"sharpe_{label}", refused=refused
+        )
+        metrics_map[f"sortino_{label}"] = _on(
+            w, lambda s: sortino(s, rf_rs), metric=f"sortino_{label}", refused=refused
+        )
+        metrics_map[f"calmar_{label}"] = _on(
+            w, lambda s: calmar(s), metric=f"calmar_{label}", refused=refused
+        )
 
     # Since-inception distribution statistics.
-    metrics_map["pct_positive_SI"] = _on(windows["SI"], lambda s: pct_positive(s))
-    metrics_map["best_period_SI"] = _on(windows["SI"], lambda s: best_period(s))
-    metrics_map["worst_period_SI"] = _on(windows["SI"], lambda s: worst_period(s))
-    metrics_map["skew_SI"] = _on(windows["SI"], lambda s: skew(s))
-    metrics_map["kurtosis_SI"] = _on(windows["SI"], lambda s: kurtosis(s))
+    metrics_map["pct_positive_SI"] = _on(
+        windows["SI"], lambda s: pct_positive(s), metric="pct_positive_SI", refused=refused
+    )
+    metrics_map["best_period_SI"] = _on(
+        windows["SI"], lambda s: best_period(s), metric="best_period_SI", refused=refused
+    )
+    metrics_map["worst_period_SI"] = _on(
+        windows["SI"], lambda s: worst_period(s), metric="worst_period_SI", refused=refused
+    )
+    metrics_map["skew_SI"] = _on(
+        windows["SI"], lambda s: skew(s), metric="skew_SI", refused=refused
+    )
+    metrics_map["kurtosis_SI"] = _on(
+        windows["SI"], lambda s: kurtosis(s), metric="kurtosis_SI", refused=refused
+    )
 
     # Daily-basis family (reads investment.source; null when there is no source).
-    metrics_map["max_drawdown_SI"] = _null_safe(lambda: max_drawdown_of(investment))
-    metrics_map["var95_SI"] = _null_safe(lambda: var_historical_of(investment))
-    metrics_map["cvar95_SI"] = _null_safe(lambda: cvar_of(investment))
+    metrics_map["max_drawdown_SI"] = _null_safe(
+        lambda: max_drawdown_of(investment), metric="max_drawdown_SI", refused=refused
+    )
+    metrics_map["var95_SI"] = _null_safe(
+        lambda: var_historical_of(investment), metric="var95_SI", refused=refused
+    )
+    metrics_map["cvar95_SI"] = _null_safe(
+        lambda: cvar_of(investment), metric="cvar95_SI", refused=refused
+    )
 
     # Referenced figures of record (trailing CAGRs from the return engine),
     # merged verbatim — never recomputed here (see docstring).
@@ -249,19 +307,26 @@ def build_metrics(
         metadata=meta,
         metrics=metrics_map,
         series=series,
+        refused=refused,
     )
 
 
 def _on(
-    window: ReturnSeries | None, fn: Callable[[ReturnSeries], float]
+    window: ReturnSeries | None,
+    fn: Callable[[ReturnSeries], float],
+    *,
+    metric: str,
+    refused: dict[str, str],
 ) -> float | None:
     """Apply a metric to a trailing-window slice; ``None`` when the slice is absent."""
     if window is None:
         return None
-    return _null_safe(lambda: fn(window))
+    return _null_safe(lambda: fn(window), metric=metric, refused=refused)
 
 
-def _ytd_return(rs: ReturnSeries, as_of: date | None) -> float | None:
+def _ytd_return(
+    rs: ReturnSeries, as_of: date | None, *, refused: dict[str, str]
+) -> float | None:
     """Absolute compounded return from the first month-end of ``as_of``'s year."""
     if as_of is None:
         return None
@@ -269,5 +334,7 @@ def _ytd_return(rs: ReturnSeries, as_of: date | None) -> float | None:
     if len(window) < 1:
         return None
     return _null_safe(
-        lambda: period_return_abs(window, window.dates[0], window.dates[-1])
+        lambda: period_return_abs(window, window.dates[0], window.dates[-1]),
+        metric="return_YTD",
+        refused=refused,
     )

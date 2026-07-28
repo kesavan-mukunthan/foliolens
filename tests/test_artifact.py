@@ -64,7 +64,7 @@ def test_schema_version_present() -> None:
 
 def test_artifact_top_level_shape() -> None:
     d = build_metrics(_healthy_fund(), _rf()).to_dict()
-    assert set(d) == {"schema_version", "metadata", "metrics", "series"}
+    assert set(d) == {"schema_version", "metadata", "metrics", "series", "refused"}
     assert d["metadata"]["id"] == "HEALTHY"
     assert d["metadata"]["as_of"] == "2027-12-31"
 
@@ -192,6 +192,26 @@ def test_young_fund_nulls_not_errors() -> None:
     # What IS computable stays populated (not nulled indiscriminately).
     assert m["volatility_SI"] is not None   # 2 points is enough for volatility
     assert m["return_1M"] is not None
+
+
+def test_refused_populated_for_insufficient_history_metrics() -> None:
+    # NAV-backed (daily_shareclass) so the daily-basis family (max_drawdown/
+    # var/cvar) succeeds on its own >= 1 point guard and doesn't interfere;
+    # only 2 monthly points -> skew (needs >= 3) / kurtosis (needs >= 4) and
+    # every 1Y/3Y/5Y window (needs 12/36/60) raise InsufficientHistoryError.
+    rng = np.random.default_rng(3)
+    levels = 100.0 * np.cumprod(1.0 + rng.normal(0.0, 0.01, 95))
+    young = daily_shareclass(levels, id="YOUNG2")
+    mr = build_metrics(young, _rf(2))
+
+    assert mr.metrics["skew_SI"] is None
+    assert mr.metrics["kurtosis_SI"] is None
+    assert mr.refused["skew_SI"] == "insufficient_history(required=3, available=2)"
+    assert mr.refused["kurtosis_SI"] == "insufficient_history(required=4, available=2)"
+    # A metric nulled for a different reason (window absent, never even
+    # calling the metric function) carries no refused entry.
+    assert mr.metrics["volatility_1Y"] is None
+    assert "volatility_1Y" not in mr.refused
 
 
 def test_young_fund_rolling_panels_empty() -> None:

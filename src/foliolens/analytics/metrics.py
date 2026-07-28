@@ -20,7 +20,7 @@ import numpy.typing as npt
 from foliolens.model.value_objects import ReturnSeries
 
 from ..returns.frequency import Frequency
-from .series_ops import align, between, require_frequency
+from .series_ops import InsufficientHistoryError, align, between, require_frequency
 
 
 def period_return_abs(rs: ReturnSeries, start: date, end: date) -> float:
@@ -33,7 +33,9 @@ def period_return_abs(rs: ReturnSeries, start: date, end: date) -> float:
     """
     window = between(rs, start, end)
     if len(window) < 1:
-        raise ValueError(f"no returns in window [{start}, {end}]")
+        raise InsufficientHistoryError(
+            1, 0, f"no returns in window [{start}, {end}]"
+        )
     return float(np.prod(1.0 + window.values) - 1.0)
 
 
@@ -44,7 +46,7 @@ def volatility(rs: ReturnSeries) -> float:
     """
     require_frequency(rs, Frequency.MONTHLY)
     if len(rs) < 2:
-        raise ValueError(f"volatility needs >= 2 returns, got {len(rs)}")
+        raise InsufficientHistoryError(2, len(rs), f"volatility needs >= 2 returns, got {len(rs)}")
     return float(np.std(rs.values, ddof=1) * np.sqrt(rs.frequency.periods_per_year))
 
 
@@ -71,7 +73,9 @@ def downside_deviation(rs: ReturnSeries, mar: ReturnSeries) -> float:
     require_frequency(rs, Frequency.MONTHLY)
     r, m = align(rs, mar)
     if len(r) < 1:
-        raise ValueError("downside_deviation needs >= 1 overlapping return")
+        raise InsufficientHistoryError(
+            1, len(r), "downside_deviation needs >= 1 overlapping return"
+        )
     return _downside_deviation(r - m, rs.frequency.periods_per_year)
 
 
@@ -85,7 +89,9 @@ def sharpe(rs: ReturnSeries, rf: ReturnSeries) -> float:
     require_frequency(rs, Frequency.MONTHLY)
     r, f = align(rs, rf)
     if len(r) < 2:
-        raise ValueError(f"sharpe needs >= 2 overlapping returns, got {len(r)}")
+        raise InsufficientHistoryError(
+            2, len(r), f"sharpe needs >= 2 overlapping returns, got {len(r)}"
+        )
     excess = r - f
     return float(
         np.mean(excess) / np.std(excess, ddof=1) * np.sqrt(rs.frequency.periods_per_year)
@@ -105,7 +111,9 @@ def sortino(rs: ReturnSeries, rf: ReturnSeries) -> float:
     require_frequency(rs, Frequency.MONTHLY)
     r, f = align(rs, rf)
     if len(r) < 2:
-        raise ValueError(f"sortino needs >= 2 overlapping returns, got {len(r)}")
+        raise InsufficientHistoryError(
+            2, len(r), f"sortino needs >= 2 overlapping returns, got {len(r)}"
+        )
     excess = r - f
     downside = _downside_deviation(excess, rs.frequency.periods_per_year)
     if downside == 0.0:
@@ -125,7 +133,7 @@ def calmar(rs: ReturnSeries) -> float:
     """
     require_frequency(rs, Frequency.MONTHLY)
     if len(rs) < 1:
-        raise ValueError("calmar needs >= 1 return")
+        raise InsufficientHistoryError(1, len(rs), "calmar needs >= 1 return")
     values = rs.values
     # Seed a peak level of 1.0 before the first period so a first-period decline
     # is measured from the start (drawdown is scale-invariant, so 1.0 vs 100).

@@ -16,7 +16,11 @@ from datetime import date
 import numpy as np
 
 from foliolens.model.investments import SeriesInvestment
-from foliolens.report.flexipage.assembly import _window_disclosure, build_fund_panel
+from foliolens.report.flexipage.assembly import (
+    _window_disclosure,
+    _window_refused,
+    build_fund_panel,
+)
 from foliolens.returns.frequency import Frequency
 from fixtures import daily_shareclass, returns_series
 
@@ -36,7 +40,9 @@ def test_full_overlap_n_overlap_rf_equals_n_months() -> None:
     yardstick_rs = returns_series(np.full(60, 0.008))
     as_of = fund_rs.dates[-1]
 
-    disclosure = _window_disclosure(fund_rs, rf_rs, yardstick_rs, 12, as_of)
+    disclosure = _window_disclosure(
+        fund_rs, rf_rs, yardstick_rs, 12, as_of, label="1Y", refused_by_metric={}
+    )
     assert disclosure["n_months"] == 12
     assert disclosure["n_overlap_rf"] == 12
     assert disclosure["n_overlap_benchmark"] == 12
@@ -52,7 +58,9 @@ def test_truncated_rf_reports_the_reduced_overlap_it_actually_has() -> None:
                             start_month=fund_rs.dates[-6].month)
     yardstick_rs = returns_series(np.full(60, 0.008))
 
-    disclosure = _window_disclosure(fund_rs, rf_rs, yardstick_rs, 12, as_of)
+    disclosure = _window_disclosure(
+        fund_rs, rf_rs, yardstick_rs, 12, as_of, label="1Y", refused_by_metric={}
+    )
     assert disclosure["n_months"] == 12
     assert disclosure["n_overlap_rf"] == 6
     assert disclosure["n_overlap_benchmark"] == 12
@@ -65,12 +73,27 @@ def test_window_absent_reports_zero_counts_not_null() -> None:
     yardstick_rs = returns_series(np.full(6, 0.008))
     as_of = fund_rs.dates[-1]
 
-    disclosure = _window_disclosure(fund_rs, rf_rs, yardstick_rs, 12, as_of)
+    disclosure = _window_disclosure(
+        fund_rs, rf_rs, yardstick_rs, 12, as_of, label="1Y", refused_by_metric={}
+    )
     assert disclosure == {
         "n_months": 0,
         "n_overlap_rf": 0,
         "n_overlap_benchmark": 0,
         "refused": {},
+    }
+
+
+def test_window_refused_strips_the_window_suffix_and_ignores_other_windows() -> None:
+    refused_by_metric = {
+        "sharpe_1Y": "insufficient_history(required=2, available=0)",
+        "downside_deviation_1Y": "insufficient_history(required=1, available=0)",
+        "volatility_3Y": "insufficient_history(required=2, available=1)",
+        "skew_SI": "insufficient_history(required=3, available=2)",
+    }
+    assert _window_refused("1Y", refused_by_metric) == {
+        "sharpe": "insufficient_history(required=2, available=0)",
+        "downside_deviation": "insufficient_history(required=1, available=0)",
     }
 
 

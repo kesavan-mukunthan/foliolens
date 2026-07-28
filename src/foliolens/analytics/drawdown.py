@@ -42,7 +42,7 @@ from foliolens.model.value_objects import ReturnSeries, ValueIndex
 
 from ..returns.convert import to_index
 from ..returns.frequency import Frequency
-from .series_ops import require_frequency
+from .series_ops import InsufficientHistoryError, require_frequency
 
 _VAR_CUTOFF = 0.05  # 95% VaR/CVaR — the spec-analytics §3 confidence level
 
@@ -109,7 +109,7 @@ def max_drawdown(rs: ReturnSeries) -> float:
     """
     require_frequency(rs, Frequency.DAILY)
     if len(rs) < 1:
-        raise ValueError("max_drawdown needs >= 1 return")
+        raise InsufficientHistoryError(1, len(rs), "max_drawdown needs >= 1 return")
     levels = _seeded_levels(rs)
     running_max = np.fmax.accumulate(levels)
     return float(np.min((levels - running_max) / running_max))
@@ -126,7 +126,7 @@ def underwater(idx: ValueIndex) -> ReturnSeries:
     :func:`drawdown`: the caller's ``idx`` may be daily or month-end.
     """
     if len(idx) < 1:
-        raise ValueError("underwater needs >= 1 level")
+        raise InsufficientHistoryError(1, len(idx), "underwater needs >= 1 level")
     running_max = np.fmax.accumulate(idx.levels)
     dd = (idx.levels - running_max) / running_max
     return ReturnSeries(dates=idx.dates, values=dd, frequency=Frequency.DAILY)
@@ -143,7 +143,7 @@ def drawdown(idx: ValueIndex) -> Drawdown:
     first date when the series never declines.
     """
     if len(idx) < 1:
-        raise ValueError("drawdown needs >= 1 level")
+        raise InsufficientHistoryError(1, len(idx), "drawdown needs >= 1 level")
     levels = idx.levels
     dates = idx.dates
     dd = underwater(idx).values
@@ -177,7 +177,7 @@ def var_historical(rs: ReturnSeries, cutoff: float = _VAR_CUTOFF) -> float:
     """
     require_frequency(rs, Frequency.DAILY)
     if len(rs) < 1:
-        raise ValueError("var_historical needs >= 1 return")
+        raise InsufficientHistoryError(1, len(rs), "var_historical needs >= 1 return")
     return float(np.percentile(rs.values, 100.0 * cutoff))
 
 
@@ -192,7 +192,7 @@ def cvar(rs: ReturnSeries, cutoff: float = _VAR_CUTOFF) -> float:
     require_frequency(rs, Frequency.DAILY)
     n = len(rs)
     if n < 1:
-        raise ValueError("cvar needs >= 1 return")
+        raise InsufficientHistoryError(1, n, "cvar needs >= 1 return")
     cutoff_index = int((n - 1) * cutoff)
     return float(np.mean(np.partition(rs.values, cutoff_index)[: cutoff_index + 1]))
 
