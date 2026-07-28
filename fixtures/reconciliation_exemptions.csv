@@ -1,0 +1,3 @@
+amfi_code,window,as_of,reason
+103340,SI,2026-05-31,"pre-Nov-2009 history under this AMFI code belongs to a different scheme/plan (+900% NAV discontinuity 2009-10-30→11-02); SI uncomputable from fixture history — data-quality issue FL-DQ-1"
+120381,SI,2026-05-31,"published SI baseline = direct-plan inception 2013-01-01, one day before first fixture NAV; residual ~10.2bps vs 10bps tolerance incl. published 2dp rounding — AMC factsheet convention gap"
