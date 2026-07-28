@@ -23,7 +23,7 @@ stored inputs re-serialise identically (``spec-analytics §5`` acceptance).
 
 The metric arithmetic stays in the pure functions of ``metrics`` /
 ``distribution`` / ``rolling`` and the §3 daily adapters; this builder reads
-``investment.returns`` **once**, slices it for the trailing windows, and
+``investment.returns(Frequency.MONTHLY)`` **once**, slices it for the trailing windows, and
 orchestrates — it invents no arithmetic.
 
 This is the **generic** metrics contract. Flexipage-specific fields (ranks,
@@ -41,6 +41,7 @@ from typing import Any
 
 from foliolens.model.investments import Investment
 from foliolens.model.value_objects import ReturnSeries
+from foliolens.returns.frequency import Frequency
 
 from .distribution import best_period, kurtosis, pct_positive, skew, worst_period
 from .drawdown import cvar_of, max_drawdown_of, var_historical_of
@@ -53,7 +54,7 @@ from .metrics import (
     volatility,
 )
 from .rolling import rolling_returns
-from .series_ops import between
+from .series_ops import between, trailing_anchored
 
 #: Artifact schema version — bump on any breaking shape change to ``to_dict``.
 SCHEMA_VERSION = "analytics-1"
@@ -140,21 +141,6 @@ def _null_safe(fn: Callable[[], float]) -> float | None:
     return value
 
 
-def _trailing(rs: ReturnSeries, months: int) -> ReturnSeries | None:
-    """The last ``months`` points of ``rs`` as a ``ReturnSeries``; ``None`` if too short.
-
-    The window-shorter-than-history rule (``spec-analytics §4``): a fund with
-    fewer than ``months`` monthly points has no trailing ``months``-window figure,
-    so the caller emits ``null`` rather than a partial window.
-    """
-    if len(rs) < months:
-        return None
-    lo = len(rs) - months
-    return ReturnSeries(
-        dates=rs.dates[lo:], values=rs.values[lo:], frequency=rs.frequency, base=rs.base
-    )
-
-
 def build_metrics(
     investment: Investment,
     rf: Investment,
@@ -167,23 +153,39 @@ def build_metrics(
     """Assemble the ``MetricsResult`` for one investment from the metric functions.
 
     Orchestration only — every figure comes from a pure function over the
-    materialised monthly series (read once as ``investment.returns``) or from the
+    materialised monthly series (read once as ``investment.returns(Frequency.MONTHLY)``) or from the
     §3 daily adapters over ``investment.source``. Windowed risk metrics take the
     trailing ``window_months`` slice and fall to ``null`` when history is shorter
     than the window. Daily-basis metrics (drawdown / VaR / CVaR) are ``null``
     when the investment carries no NAV source. rf is an Investment; its
-    ``.returns`` feed the two-series metrics.
+    ``.returns(Frequency.MONTHLY)`` feed the two-series metrics.
 
     Trailing 1Y/3Y/5Y/SI CAGRs are the return engine's **figures of record** —
     this layer never recomputes them. The caller that holds the engine output
     passes them in via ``figures_of_record`` (e.g. ``{"return_1Y": 0.18, …}``)
     and they are merged into the flat metrics map verbatim: the artifact
     *references* them, so a downstream consumer never re-derives them.
+
+    Common anchoring (``spec-analytics``): every fixed-window metric (the
+    sub-year period returns, YTD, and the 1Y/3Y/5Y windows) is measured
+    ending exactly at ``as_of`` — never at ``investment``'s own last month.
+    When the caller passes no ``as_of``, it defaults to this investment's own
+    last date (single-fund use, unchanged from before); when a caller (a
+    cross-sectional run) passes an explicit shared ``as_of`` that this
+    investment's panel does not reach, every fixed-window metric emits
+    ``null`` via the existing null path rather than silently falling back to
+    a different, incomparable end date. ``SI`` (since-inception) is the one
+    exception — it is deliberately *not* anchored, since it reports the
+    investment's own full history, not a fixed cross-sectional window.
     """
-    rs = investment.returns
-    rf_rs = rf.returns
+    rs = investment.returns(Frequency.MONTHLY)
+    rf_rs = rf.returns(Frequency.MONTHLY)
     if as_of is None and len(rs):
         as_of = rs.dates[-1]
+    # Narrowed to a concrete date only when it is actually in rs.dates — the
+    # None case (absent as_of, or an as_of this panel never reaches) is the
+    # single gate every fixed-window metric below routes its null through.
+    anchor: date | None = as_of if as_of is not None and as_of in rs.dates else None
 
     meta: dict[str, Any] = {"id": investment.id}
     if as_of is not None:
@@ -196,14 +198,16 @@ def build_metrics(
     # Sub-year period returns (absolute, compounded over the monthly series).
     for label, months in _PERIOD_MONTHS.items():
         metrics_map[f"return_{label}"] = _on(
-            _trailing(rs, months),
+            trailing_anchored(rs, months, anchor) if anchor is not None else None,
             lambda s: period_return_abs(s, s.dates[0], s.dates[-1]),
         )
-    metrics_map["return_YTD"] = _ytd_return(rs, as_of)
+    metrics_map["return_YTD"] = _ytd_return(rs, anchor) if anchor is not None else None
 
-    # Windowed risk / risk-adjusted metrics: trailing 1Y/3Y/5Y + since-inception.
+    # Windowed risk / risk-adjusted metrics: trailing 1Y/3Y/5Y (anchored) +
+    # since-inception (never anchored, see docstring).
     windows: dict[str, ReturnSeries | None] = {
-        label: _trailing(rs, months) for label, months in _WINDOW_MONTHS.items()
+        label: (trailing_anchored(rs, months, anchor) if anchor is not None else None)
+        for label, months in _WINDOW_MONTHS.items()
     }
     windows["SI"] = rs if len(rs) else None
     for label, w in windows.items():

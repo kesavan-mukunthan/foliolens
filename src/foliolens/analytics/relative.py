@@ -4,7 +4,7 @@ Pure free functions in the shape of §2: they take the fund's monthly
 ``ReturnSeries`` and the benchmark's (and, where the metric is risk-adjusted,
 the rf's), align through :mod:`series_ops`, and never touch NAV. The benchmark
 and rf enter as return *series* — the ``Investment`` adapters in
-:mod:`.adapters` read ``.returns`` off the benchmark/rf Investments and delegate
+:mod:`.adapters` read ``.returns(Frequency.MONTHLY)`` off the benchmark/rf Investments and delegate
 here (``CLAUDE.md`` → *Analytics conventions*: rf & benchmark are ``Investment``s,
 never scalars; the benchmark return-variant is TRI, never PRI — that is the
 benchmark Investment's identity, upstream of this layer).
@@ -48,7 +48,6 @@ from .metrics import sharpe, volatility
 from .rolling import rolling_return
 from .series_ops import align, align_dated
 
-_MONTHS_PER_YEAR = 12.0
 _Array = npt.NDArray[np.float64]
 
 
@@ -100,10 +99,11 @@ def information_ratio(fund: ReturnSeries, benchmark: ReturnSeries) -> float:
     if len(r) < 2:
         raise ValueError(f"information_ratio needs >= 2 overlapping periods, got {len(r)}")
     active = r - rb
-    te = float(np.std(active, ddof=1)) * np.sqrt(_MONTHS_PER_YEAR)
+    periods_per_year = fund.frequency.periods_per_year
+    te = float(np.std(active, ddof=1)) * np.sqrt(periods_per_year)
     if te == 0.0:
         raise ValueError("information_ratio undefined: tracking error is zero")
-    return float(float(np.mean(active)) * _MONTHS_PER_YEAR / te)
+    return float(float(np.mean(active)) * periods_per_year / te)
 
 
 # ---------------------------------------------------------------------------
@@ -234,7 +234,7 @@ def jensens_alpha(
     else:
         t_stat = alpha_periodic / se_alpha
 
-    alpha_annual = (1.0 + alpha_periodic) ** _MONTHS_PER_YEAR - 1.0
+    alpha_annual = (1.0 + alpha_periodic) ** fund.frequency.periods_per_year - 1.0
     return AlphaResult(
         alpha=float(alpha_annual),
         alpha_periodic=float(alpha_periodic),
@@ -265,7 +265,7 @@ def treynor(fund: ReturnSeries, benchmark: ReturnSeries, rf: ReturnSeries) -> fl
     b = beta(fund, benchmark)
     if b == 0.0:
         raise ValueError("treynor undefined: beta is zero")
-    return float(np.mean(r - f)) * _MONTHS_PER_YEAR / b
+    return float(np.mean(r - f)) * fund.frequency.periods_per_year / b
 
 
 # ---------------------------------------------------------------------------
@@ -273,16 +273,16 @@ def treynor(fund: ReturnSeries, benchmark: ReturnSeries, rf: ReturnSeries) -> fl
 # ---------------------------------------------------------------------------
 
 
-def _cagr(values: _Array) -> float:
-    """CAGR of a per-period return array: ``(Π(1+v))^(12/n) − 1`` (≡ empyrical)."""
+def _cagr(values: _Array, periods_per_year: int) -> float:
+    """CAGR of a per-period return array: ``(Π(1+v))^(periods_per_year/n) − 1`` (≡ empyrical)."""
     n = len(values)
     ending = float(np.prod(1.0 + values))
-    return float(ending ** (_MONTHS_PER_YEAR / n) - 1.0)
+    return float(ending ** (periods_per_year / n) - 1.0)
 
 
-def _capture(r: _Array, rb: _Array) -> float:
+def _capture(r: _Array, rb: _Array, periods_per_year: int) -> float:
     """Capture ratio on a subset: ``CAGR(r)/CAGR(rb)`` (≡ ``empyrical.capture``)."""
-    return _cagr(r) / _cagr(rb)
+    return _cagr(r, periods_per_year) / _cagr(rb, periods_per_year)
 
 
 def up_capture(fund: ReturnSeries, benchmark: ReturnSeries) -> float:
@@ -296,7 +296,7 @@ def up_capture(fund: ReturnSeries, benchmark: ReturnSeries) -> float:
     mask = rb > 0.0
     if not mask.any():
         raise ValueError("up_capture undefined: benchmark has no positive months")
-    return _capture(r[mask], rb[mask])
+    return _capture(r[mask], rb[mask], fund.frequency.periods_per_year)
 
 
 def down_capture(fund: ReturnSeries, benchmark: ReturnSeries) -> float:
@@ -310,7 +310,7 @@ def down_capture(fund: ReturnSeries, benchmark: ReturnSeries) -> float:
     mask = rb < 0.0
     if not mask.any():
         raise ValueError("down_capture undefined: benchmark has no negative months")
-    return _capture(r[mask], rb[mask])
+    return _capture(r[mask], rb[mask], fund.frequency.periods_per_year)
 
 
 # ---------------------------------------------------------------------------

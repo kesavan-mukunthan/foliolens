@@ -2,14 +2,15 @@
 from __future__ import annotations
 
 from calendar import monthrange
+from collections.abc import Sequence
 from datetime import date, timedelta
 from decimal import Decimal
 
 import numpy as np
 
-from foliolens.model.investments import SeriesInvestment, ShareClass
-from foliolens.model.sources import PricedSource
+from foliolens.model.investments import SeriesInvestment, ShareClass, share_class_from_nav
 from foliolens.model.value_objects import NavSeries, ReturnSeries
+from foliolens.returns.calendar import TradingCalendar, calendar_from_dates
 from foliolens.returns.frequency import Frequency
 
 # The return-space Investment (id + materialised ReturnSeries, no NAV, no I/O)
@@ -73,18 +74,23 @@ def daily_nav(
     return NavSeries(amfi_code=amfi_code, data=data)
 
 
+def synthetic_calendar(dates: Sequence[date]) -> TradingCalendar:
+    """A single-series ``TradingCalendar`` over exactly ``dates`` (see
+    ``returns.calendar.calendar_from_dates``). Test-only synthetic factories
+    build their calendar this way, from exactly the NAV dates they
+    construct — never a mix of unrelated fixture funds' dates.
+    """
+    return calendar_from_dates(dates)
+
+
 def daily_shareclass(
     values: object, start: date = date(2024, 1, 1), id: str = "SCDAILY"
 ) -> ShareClass:
     """A ``ShareClass`` priced on a daily NAV series — for the §3 daily adapters."""
     nav = daily_nav(values, start)
-    return ShareClass(
-        id=id,
-        amfi_code=nav.amfi_code,
-        isin="INF888X01X88",
-        plan="direct",
-        option="growth",
-        source=PricedSource(nav=nav),
+    cal = synthetic_calendar([d for d, _ in nav.data])
+    return share_class_from_nav(
+        id, nav, cal, isin="INF888X01X88", plan="direct", option="growth"
     )
 
 

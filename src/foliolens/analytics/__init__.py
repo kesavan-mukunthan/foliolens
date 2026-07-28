@@ -22,7 +22,7 @@ stats ``pct_positive``, ``best_period``, ``worst_period``, ``skew``,
 ``kurtosis`` — all pure over ``ReturnSeries``.
 
 §5 (adapters + artifact): the ``*_of(investment, …)`` peers that read
-``investment.returns`` and delegate to the pure functions (``adapters``), and the
+``investment.returns(Frequency.MONTHLY)`` and delegate to the pure functions (``adapters``), and the
 versioned metrics artifact ``MetricsResult`` / ``build_metrics`` (``artifact``).
 
 §6 (benchmark-relative): pure functions over the aligned fund/benchmark/rf
@@ -32,7 +32,7 @@ series (``relative``) — ``excess_return``, ``tracking_error``,
 ``up_capture`` / ``down_capture``, ``hit_rate``, and the rolling-relative panels
 (``rolling_excess_return`` / ``rolling_beta`` / ``rolling_correlation`` /
 ``rolling_sharpe``, compositions over §4's windowing) — with the ``*_of``
-adapters that read the fund's / benchmark's / rf's ``.returns`` (benchmark &
+adapters that read the fund's / benchmark's / rf's ``.returns(Frequency.MONTHLY)`` (benchmark &
 rf as Investments).
 
 §7 (peer / cross-sectional): pure functions over a caller-supplied cohort
@@ -153,7 +153,7 @@ __all__ = [
     "worst_period",
     "skew",
     "kurtosis",
-    # §5 adapters (read .returns, delegate to the pure functions)
+    # §5 adapters (read .returns(Frequency.MONTHLY), delegate to the pure functions)
     "period_return_abs_of",
     "volatility_of",
     "downside_deviation_of",

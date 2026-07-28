@@ -23,8 +23,6 @@ from ..returns.frequency import Frequency
 from .metrics import period_return_abs
 from .series_ops import require_frequency
 
-_MONTHS_PER_YEAR = 12.0
-
 #: Rolling window labels → window length in months. Mirrors the anchored-period
 #: labels used by the return engine (``returns/engine.py``'s ``_ANCHOR_YEARS``).
 ROLLING_WINDOWS: dict[str, int] = {"1Y": 12, "3Y": 36, "5Y": 60}
@@ -57,7 +55,7 @@ def rolling_return(rs: ReturnSeries, window_months: int) -> ReturnSeries:
     for end_i in range(window_months - 1, n):
         start_i = end_i - window_months + 1
         compounded = period_return_abs(rs, rs.dates[start_i], rs.dates[end_i])
-        annualised = (1.0 + compounded) ** (_MONTHS_PER_YEAR / window_months) - 1.0
+        annualised = (1.0 + compounded) ** (rs.frequency.periods_per_year / window_months) - 1.0
         dates.append(rs.dates[end_i])
         values.append(annualised)
     return ReturnSeries(

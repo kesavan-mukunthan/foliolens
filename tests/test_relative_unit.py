@@ -1,10 +1,11 @@
 """Unit + delegation behaviour for §6 benchmark-relative metrics.
 
 Two things beyond the oracle suite: (1) every ``*_of`` adapter equals its pure
-function over the Investments' ``.returns`` (adapters compute nothing beyond
-delegation, ``spec-analytics §5``), including the stored-default-benchmark read;
-and (2) the rolling-relative panels are compositions over §4's windowing — equal
-by construction to the pure machinery, monthly step, empty when history is short.
+function over the Investments' ``.returns(Frequency.MONTHLY)`` (adapters
+compute nothing beyond delegation, ``spec-analytics §5``), including the
+stored-default-benchmark read; and (2) the rolling-relative panels are
+compositions over §4's windowing — equal by construction to the pure
+machinery, monthly step, empty when history is short.
 """
 from __future__ import annotations
 
@@ -19,6 +20,7 @@ from foliolens.model.holdings import Holding
 from foliolens.model.investments import Investment, SeriesInvestment
 from foliolens.model.sources import ReturnSource
 from foliolens.model.value_objects import ReturnSeries
+from foliolens.returns.frequency import Frequency
 from fixtures import fixed_investment, rf_investment, returns_series
 
 _FUND_VALUES = [((i % 5) - 1) / 100.0 for i in range(36)]
@@ -30,7 +32,7 @@ class _Fund:
     """Minimal Investment carrying a returns series and a stored benchmark."""
 
     id: str
-    returns: ReturnSeries
+    returns_series: ReturnSeries
     benchmark: Investment | None
 
     @property
@@ -40,6 +42,11 @@ class _Fund:
     @property
     def source(self) -> ReturnSource:
         raise NotImplementedError("_Fund is return-space only")
+
+    def returns(self, freq: Frequency) -> ReturnSeries:
+        if freq != self.returns_series.frequency:
+            raise ValueError(f"{self.id!r} has no {freq} panel")
+        return self.returns_series
 
 
 def _fund_inv() -> SeriesInvestment:
@@ -57,7 +64,11 @@ def _bench_inv() -> SeriesInvestment:
 
 def test_scalar_adapters_delegate_exactly() -> None:
     fund, bench, rf = _fund_inv(), _bench_inv(), rf_investment()
-    f, b, rfr = fund.returns, bench.returns, rf.returns
+    f, b, rfr = (
+        fund.returns(Frequency.MONTHLY),
+        bench.returns(Frequency.MONTHLY),
+        rf.returns(Frequency.MONTHLY),
+    )
 
     assert adapters.beta_of(fund, bench) == relative.beta(f, b)
     assert adapters.correlation_of(fund, bench) == relative.correlation(f, b)
@@ -73,14 +84,16 @@ def test_scalar_adapters_delegate_exactly() -> None:
 def test_alpha_adapter_delegates_exactly() -> None:
     fund, bench, rf = _fund_inv(), _bench_inv(), rf_investment()
     own = adapters.jensens_alpha_of(fund, rf, bench)
-    pure = relative.jensens_alpha(fund.returns, bench.returns, rf.returns)
+    pure = relative.jensens_alpha(
+        fund.returns(Frequency.MONTHLY), bench.returns(Frequency.MONTHLY), rf.returns(Frequency.MONTHLY)
+    )
     assert own == pure  # AlphaResult is a frozen dataclass → structural equality
 
 
 def test_excess_return_adapter_delegates_exactly() -> None:
     fund, bench = _fund_inv(), _bench_inv()
     own = adapters.excess_return_of(fund, bench)
-    pure = relative.excess_return(fund.returns, bench.returns)
+    pure = relative.excess_return(fund.returns(Frequency.MONTHLY), bench.returns(Frequency.MONTHLY))
     assert own.dates == pure.dates
     assert np.array_equal(own.values, pure.values)
 
@@ -92,21 +105,21 @@ def test_excess_return_adapter_delegates_exactly() -> None:
 
 def test_adapter_uses_stored_benchmark_by_default() -> None:
     bench = _bench_inv()
-    fund = _Fund(id="fund", returns=returns_series(_FUND_VALUES), benchmark=bench)
+    fund = _Fund(id="fund", returns_series=returns_series(_FUND_VALUES), benchmark=bench)
     # No explicit benchmark → reads investment.benchmark.
-    assert adapters.beta_of(fund) == relative.beta(fund.returns, bench.returns)
+    assert adapters.beta_of(fund) == relative.beta(fund.returns(Frequency.MONTHLY), bench.returns(Frequency.MONTHLY))
 
 
 def test_adapter_override_beats_stored_benchmark() -> None:
     stored = _bench_inv()
     override = fixed_investment([((i % 3) - 1) / 100.0 for i in range(36)], id="other")
-    fund = _Fund(id="fund", returns=returns_series(_FUND_VALUES), benchmark=stored)
-    assert adapters.beta_of(fund, override) == relative.beta(fund.returns, override.returns)
+    fund = _Fund(id="fund", returns_series=returns_series(_FUND_VALUES), benchmark=stored)
+    assert adapters.beta_of(fund, override) == relative.beta(fund.returns(Frequency.MONTHLY), override.returns(Frequency.MONTHLY))
     assert adapters.beta_of(fund, override) != adapters.beta_of(fund)
 
 
 def test_adapter_no_benchmark_raises() -> None:
-    fund = _Fund(id="fund", returns=returns_series(_FUND_VALUES), benchmark=None)
+    fund = _Fund(id="fund", returns_series=returns_series(_FUND_VALUES), benchmark=None)
     with pytest.raises(ValueError, match="no benchmark"):
         adapters.beta_of(fund)
 
@@ -143,7 +156,7 @@ def test_rolling_beta_monthly_step_and_stamping() -> None:
 def test_rolling_correlation_delegates() -> None:
     fund, bench = _fund_inv(), _bench_inv()
     own = adapters.rolling_correlation_of(fund, 12, bench)
-    pure = relative.rolling_correlation(fund.returns, bench.returns, 12)
+    pure = relative.rolling_correlation(fund.returns(Frequency.MONTHLY), bench.returns(Frequency.MONTHLY), 12)
     assert own.dates == pure.dates
     assert np.array_equal(own.values, pure.values)
 
@@ -172,7 +185,7 @@ def test_rolling_bundles_cover_relative_windows() -> None:
 
 def test_treynor_composition_identity() -> None:
     fund, bench = returns_series(_FUND_VALUES), returns_series(_BENCH_VALUES)
-    rf = rf_investment().returns
+    rf = rf_investment().returns(Frequency.MONTHLY)
     from foliolens.analytics.series_ops import align
 
     r, f = align(fund, rf)

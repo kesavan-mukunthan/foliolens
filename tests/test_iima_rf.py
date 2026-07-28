@@ -14,6 +14,7 @@ import pytest
 
 from foliolens.ingest.iima import parse_iima_rf, rf_investment
 from foliolens.model.investments import Investment, SeriesInvestment
+from foliolens.returns.frequency import Frequency
 
 _IIMA_CSV = (
     "Date,SMB,HML,WML,MF,RF\n"
@@ -76,4 +77,4 @@ def test_rf_investment_satisfies_protocol(tmp_path: Path) -> None:
     assert isinstance(rf, SeriesInvestment)
     assert rf.benchmark is None
     assert rf.holdings == ()
-    assert rf.returns.values.dtype == np.float64
+    assert rf.returns(Frequency.MONTHLY).values.dtype == np.float64

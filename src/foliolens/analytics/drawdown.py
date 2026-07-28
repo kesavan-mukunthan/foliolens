@@ -40,7 +40,7 @@ import numpy as np
 from foliolens.model.investments import Investment
 from foliolens.model.value_objects import ReturnSeries, ValueIndex
 
-from ..returns.convert import to_index, to_returns
+from ..returns.convert import to_index
 from ..returns.frequency import Frequency
 from .series_ops import require_frequency
 
@@ -198,17 +198,20 @@ def cvar(rs: ReturnSeries, cutoff: float = _VAR_CUTOFF) -> float:
 
 
 # ---------------------------------------------------------------------------
-# Daily adapters — derive the daily series from investment.source, then delegate
+# Daily adapters — read the investment's eagerly-computed DAILY panel
 # ---------------------------------------------------------------------------
 
 
 def _daily_returns(investment: Investment) -> ReturnSeries:
-    """Daily returns straight off the stored daily NAV (``.source``), via the seam.
+    """The investment's DAILY panel, already computed by its factory.
 
-    No month-end resampling: drawdown/VaR/CVaR read the *raw* daily NAV so an
-    intra-month trough is captured, not smoothed to a month-end point.
+    No computation here: the factory (:func:`~foliolens.model.investments.
+    share_class_from_nav` / ``benchmark_from_index``) is the sole site that
+    calls ``to_returns`` for the daily panel — drawdown/VaR/CVaR read the
+    *raw* daily NAV so an intra-month trough is captured, not smoothed to a
+    month-end point.
     """
-    return to_returns(investment.source.value_series, frequency=Frequency.DAILY)
+    return investment.returns(Frequency.DAILY)
 
 
 def _daily_levels(investment: Investment) -> ValueIndex:

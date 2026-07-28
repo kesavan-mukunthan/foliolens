@@ -18,6 +18,7 @@ from foliolens.analytics.metrics import (
 )
 from foliolens.analytics.series_ops import align
 from foliolens.model.value_objects import ReturnSeries
+from foliolens.returns.frequency import Frequency
 from fixtures import rf_investment, returns_series
 
 _REL = 1e-6
@@ -60,7 +61,7 @@ def test_calmar_vs_oracle() -> None:
 
 def test_downside_deviation_vs_oracle() -> None:
     rs = _fund()
-    rf = rf_investment().returns
+    rf = rf_investment().returns(Frequency.MONTHLY)
     r, f = align(rs, rf)  # 36 common months
     oracle = empyrical.downside_risk(r, required_return=f, period="monthly")
     assert _rel_close(downside_deviation(rs, rf), float(oracle))
@@ -68,7 +69,7 @@ def test_downside_deviation_vs_oracle() -> None:
 
 def test_sharpe_vs_oracle() -> None:
     rs = _fund()
-    rf = rf_investment().returns
+    rf = rf_investment().returns(Frequency.MONTHLY)
     r, f = align(rs, rf)
     oracle = empyrical.sharpe_ratio(r, risk_free=f, period="monthly")
     assert _rel_close(sharpe(rs, rf), float(oracle))
@@ -76,7 +77,7 @@ def test_sharpe_vs_oracle() -> None:
 
 def test_sortino_vs_oracle() -> None:
     rs = _fund()
-    rf = rf_investment().returns
+    rf = rf_investment().returns(Frequency.MONTHLY)
     r, f = align(rs, rf)
     oracle = empyrical.sortino_ratio(r, required_return=f, period="monthly")
     assert _rel_close(sortino(rs, rf), float(oracle))
@@ -91,7 +92,7 @@ def test_sharpe_vs_oracle_rf_longer_than_fund() -> None:
     # Fund spans 30 months; rf spans 36. align → 30-month overlap; feed empyrical
     # the same 30-month slices so the two agree on identical inputs.
     fund = returns_series(_FUND_VALUES[:30])
-    rf = rf_investment().returns  # 36 months, same start
+    rf = rf_investment().returns(Frequency.MONTHLY)  # 36 months, same start
     r, f = align(fund, rf)
     assert len(r) == 30
     oracle = empyrical.sharpe_ratio(r, risk_free=f, period="monthly")
@@ -101,7 +102,7 @@ def test_sharpe_vs_oracle_rf_longer_than_fund() -> None:
 def test_all_negative_sortino_vs_oracle() -> None:
     # All-negative months: Sortino must stay finite and negative and match.
     neg = returns_series([-0.02, -0.01, -0.03, -0.015, -0.005])
-    rf = rf_investment().returns
+    rf = rf_investment().returns(Frequency.MONTHLY)
     r, f = align(neg, rf)
     oracle = empyrical.sortino_ratio(r, required_return=f, period="monthly")
     own = sortino(neg, rf)

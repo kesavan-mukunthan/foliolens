@@ -25,6 +25,8 @@ from foliolens.ingest.index_normalise import (
 )
 from foliolens.ingest.land import land_index
 from foliolens.model.investments import Benchmark, Investment, benchmark_from_index
+from foliolens.returns.calendar import calendar_from_dates
+from foliolens.returns.frequency import Frequency
 
 # Mirrors the confirmed niftyindices export: "Date" (not "Index Date"), the gross
 # "Total Returns Index" column, and a trailing net-TRI column that must be ignored
@@ -146,13 +148,16 @@ def _check_investment(x: Investment) -> None:
 def test_benchmark_returns_monthly_float64(tmp_path: Path) -> None:
     land_index(_records(), tmp_path)
     levels = DataAccess(tmp_path).load_index_series("NIFTY500TRI")
-    bench = benchmark_from_index(levels)
+    cal = calendar_from_dates(d for d, _ in levels.data)
+    bench = benchmark_from_index(levels, cal)
     _check_investment(bench)
     assert isinstance(bench, Benchmark)
     assert bench.id == "NIFTY500TRI"
-    r = bench.returns
+    r = bench.returns(Frequency.MONTHLY)
     assert r.values.dtype.name == "float64"
-    assert len(r) == 2  # 3 month-ends → 2 returns
+    # re-baselined: month-end fix — March (the trailing month, no April data
+    # to prove it complete) is no longer emitted, so 2 month-ends -> 1 return.
+    assert len(r) == 1
 
 
 # --- §4 index CAGR: own vs oracle on deterministic dummy data ---------------
@@ -178,9 +183,9 @@ def test_index_cagr_own_vs_oracle(tmp_path: Path, period: str, years: int) -> No
     from foliolens.returns.engine import period_return
 
     land_index(_doubling_index(), tmp_path)
-    bench = benchmark_from_index(
-        DataAccess(tmp_path).load_index_series("NIFTY500TRI")
-    )
+    levels = DataAccess(tmp_path).load_index_series("NIFTY500TRI")
+    cal = calendar_from_dates(d for d, _ in levels.data)
+    bench = benchmark_from_index(levels, cal)
     as_of = date(2025, 12, 31)
 
     rr = period_return(bench, period, as_of)

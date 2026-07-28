@@ -51,21 +51,6 @@ class NavSeries:
                 break
         return result
 
-    def month_end(self) -> NavSeries:
-        """Derived series: last available NAV on or before each calendar month-end.
-
-        No look-ahead — the selected date is always within its calendar month.
-        Incomplete leading/trailing months are included (not skipped here;
-        the caller may filter by start/end date as needed).
-        """
-        if not self.data:
-            return NavSeries(self.amfi_code, ())
-        # data is sorted ascending; later entries in the same month overwrite earlier ones
-        monthly: dict[tuple[int, int], tuple[date, Decimal]] = {}
-        for dt, nav in self.data:
-            monthly[(dt.year, dt.month)] = (dt, nav)
-        return NavSeries(self.amfi_code, tuple(monthly.values()))
-
     def between(self, start: date, end: date) -> NavSeries:
         """Slice to [start, end] inclusive."""
         return NavSeries(

@@ -32,6 +32,7 @@ from foliolens.report.flexipage.commentary import PROMPT_VERSION
 from foliolens.report.flexipage.commentary import run as run_commentary
 from foliolens.report.flexipage.runner import IndexAnomalyError, load_universe, run
 from foliolens.data_access import DataAccess
+from foliolens.returns.monthly import monthly_returns
 
 SCHEMA_PATH = Path(__file__).parent.parent / "schemas" / "flexipage-1.schema.json"
 
@@ -588,3 +589,96 @@ def test_index_anomaly_aborts_build(tmp_path: Path) -> None:
     message = str(exc_info.value)
     assert "NIFTY500TRI" in message
     assert bad_date.isoformat() in message
+
+
+# ---------------------------------------------------------------------------
+# Common anchoring (spec-analytics): a stale fund's fixed-window metrics
+# null out rather than silently anchoring to its own (earlier) last month;
+# the fresh fund's anchor is the cohort as_of, not its own last month either
+# (though for this 2-fund cohort they coincide, since the fresh fund's last
+# month is exactly the latest month reaching the >=50% threshold).
+# ---------------------------------------------------------------------------
+
+
+def test_stale_fund_windows_null_fresh_fund_anchors_to_cohort_as_of(
+    tmp_path: Path,
+) -> None:
+    data_dir = tmp_path / "data"
+    data_dir.mkdir()
+
+    stale_days = _MATURE_DAYS - 60  # ~2 months short of the fresh fund
+
+    nav_records = [
+        NavRecord(amfi_code="FRESH01", date=d, nav=nav)
+        for d, nav in _daily_series(_START, _MATURE_DAYS, seed=1)
+    ]
+    nav_records += [
+        NavRecord(amfi_code="STALE02", date=d, nav=nav)
+        for d, nav in _daily_series(_START, stale_days, seed=2)
+    ]
+    land(nav_records, data_dir)
+
+    land_scheme_master(
+        [
+            SchemeMasterRecord(
+                amfi_code="FRESH01",
+                scheme_name="Fresh Flexi Cap Fund - Direct Plan - Growth",
+                fund_house="Fresh Mutual Fund",
+                scheme_category="Equity Scheme - Flexi Cap Fund",
+                sebi_category="flexi_cap",
+                plan="direct",
+                option="growth",
+            ),
+            SchemeMasterRecord(
+                amfi_code="STALE02",
+                scheme_name="Stale Flexi Cap Fund - Direct Plan - Growth",
+                fund_house="Stale Mutual Fund",
+                scheme_category="Equity Scheme - Flexi Cap Fund",
+                sebi_category="flexi_cap",
+                plan="direct",
+                option="growth",
+            ),
+        ],
+        data_dir,
+    )
+
+    index_records = [
+        IndexRecord(index_code="NIFTY500TRI", date=d, level=level)
+        for d, level in _daily_series(_START, _MATURE_DAYS, seed=10, vol=0.008)
+    ]
+    land_index(index_records, data_dir)
+
+    benchmark_map_path = tmp_path / "benchmark_map.csv"
+    _write_benchmark_map(benchmark_map_path, [])
+
+    rf_path = tmp_path / "iima_rf.csv"
+    _write_rf_csv(rf_path, _START, _START + timedelta(days=_MATURE_DAYS + 60))
+
+    out_path = tmp_path / "out" / "metrics.json"
+    summary = run(
+        data_dir,
+        out_path,
+        rf_path=rf_path,
+        benchmark_map_path=benchmark_map_path,
+    )
+
+    # Independently derive FRESH01's own last emitted month (single-fund
+    # calendar) — with only 2 funds, the >=50% threshold is met by 1 fund
+    # alone, so the cohort as_of is the *later* of the two funds' own last
+    # months, which is FRESH01's.
+    da = DataAccess(data_dir)
+    fresh_nav = da.load_nav_series("FRESH01")
+    fresh_cal = da.derive_trading_calendar(["FRESH01"])
+    fresh_last_month = monthly_returns(fresh_nav, fresh_cal).dates[-1]
+    assert summary.as_of == fresh_last_month
+
+    with out_path.open() as fh:
+        artifact = json.load(fh)
+    fresh = _fund(artifact, "FRESH01")
+    stale = _fund(artifact, "STALE02")
+
+    for label in ("1Y", "3Y", "5Y"):
+        assert stale["metrics"][f"volatility_{label}"] is None
+        assert stale["metrics"][f"sharpe_{label}"] is None
+        assert fresh["metrics"][f"volatility_{label}"] is not None
+        assert fresh["metrics"][f"sharpe_{label}"] is not None
