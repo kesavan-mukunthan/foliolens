@@ -34,6 +34,35 @@ _METRIC_ROWS: tuple[tuple[str, str, bool, bool], ...] = (
 #: each window's Return and Excess Return (Return, Benchmark, Excess).
 BENCHMARK_RETURN_LABEL = "Benchmark Return"
 
+#: Metric-name prefixes whose figures are dimensionless *ratios* — rendered as
+#: a plain 2 dp number, never a percentage. Sharpe/Sortino/Calmar (return per
+#: unit of risk), Information Ratio (active return per unit of tracking error),
+#: and Beta (regression slope) are all unitless; multiplying them by 100 and
+#: appending "%" (as a naive return-style formatter does) is a category error —
+#: a Sharpe of 1.20 is not "120%". Everything else rendered in a metric table
+#: is a percentage-class figure (returns, volatility, downside deviation, alpha,
+#: tracking error, drawdown). This is the single source of truth the per-fund
+#: metric rows (:data:`_METRIC_ROWS`) and the index-page aggregate rows
+#: (:func:`build_aggregate_rows`) both classify against.
+_RATIO_METRIC_PREFIXES: tuple[str, ...] = (
+    "sharpe",
+    "sortino",
+    "calmar",
+    "information_ratio",
+    "beta",
+)
+
+
+def is_ratio_metric(metric_key: str) -> bool:
+    """Whether ``metric_key`` (with or without a ``_1Y``/``_3Y``/``_5Y`` window
+    suffix) names a dimensionless ratio — rendered as a plain number, not a
+    percentage. See :data:`_RATIO_METRIC_PREFIXES`.
+    """
+    return any(
+        metric_key == prefix or metric_key.startswith(f"{prefix}_")
+        for prefix in _RATIO_METRIC_PREFIXES
+    )
+
 
 def _benchmark_return(metrics: dict[str, Any], window: str) -> float | None:
     """The category benchmark's own trailing return for ``window``.
@@ -227,13 +256,20 @@ def build_index_rows(funds: list[dict[str, Any]]) -> list[IndexRow]:
 class AggregateRow:
     key: str
     label: str
+    is_pct: bool
     median: float | None
     q1: float | None
     q3: float | None
 
 
 def build_aggregate_rows(aggregates: dict[str, Any]) -> list[AggregateRow]:
-    """Category median/q1/q3 for the curated :data:`INDEX_AGGREGATE_KEYS` subset."""
+    """Category median/q1/q3 for the curated :data:`INDEX_AGGREGATE_KEYS` subset.
+
+    ``is_pct`` is ``False`` for a dimensionless ratio (Sharpe, and any other
+    :func:`is_ratio_metric` key) so the template renders it as a plain 2 dp
+    number, not a percentage — the aggregate table previously applied ``|pct``
+    uniformly, printing a Sharpe median as e.g. "120.00%" (the D2a defect).
+    """
     rows = []
     for key in INDEX_AGGREGATE_KEYS:
         agg = aggregates.get(key, {})
@@ -241,6 +277,7 @@ def build_aggregate_rows(aggregates: dict[str, Any]) -> list[AggregateRow]:
             AggregateRow(
                 key=key,
                 label=key.replace("_", " "),
+                is_pct=not is_ratio_metric(key),
                 median=agg.get("median"),
                 q1=agg.get("q1"),
                 q3=agg.get("q3"),

@@ -14,9 +14,9 @@
     {% for row in aggregate_rows %}
     <tr>
       <td>{{ row.label }}</td>
-      <td>{{ row.median|pct }}</td>
-      <td>{{ row.q1|pct }}</td>
-      <td>{{ row.q3|pct }}</td>
+      <td>{{ row.median|pct if row.is_pct else row.median|num }}</td>
+      <td>{{ row.q1|pct if row.is_pct else row.q1|num }}</td>
+      <td>{{ row.q3|pct if row.is_pct else row.q3|num }}</td>
     </tr>
     {% endfor %}
   </tbody>
