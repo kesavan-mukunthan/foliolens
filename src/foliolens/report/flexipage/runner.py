@@ -47,6 +47,7 @@ from foliolens.model.value_objects import NavSeries
 from foliolens.returns.calendar import TradingCalendar, calendar_from_dates
 from foliolens.returns.frequency import Frequency
 from foliolens.returns.monthly import month_end
+from foliolens.validation.identities import IdentityViolation, check_identities
 
 from .assembly import FundPanel, assemble_universe, build_fund_panel
 from .commentary import PROMPT_VERSION
@@ -74,6 +75,25 @@ MONTH_OVER_MONTH_MAX_ABS_CHANGE = 0.25
 #: from genuine historical volatility without false-positiving on those two
 #: real extremes.
 ANOMALY_CHECK_START_DATE = date(2010, 1, 1)
+
+
+class IdentityCheckError(RuntimeError):
+    """One or more funds' assembled metrics fail a B1 identity cross-check.
+
+    Fails the whole build loud, listing every violation — never a warn-and-
+    continue mode, never a bypass flag (a violation means the artifact is
+    about to publish a Sharpe/IR/alpha that could not have come from its own
+    reported return/vol/beta/tracking-error, the exact class of bug the
+    pre-fix site shipped once already; see ``validation/identities.py``).
+    """
+
+
+def _format_violations(violations: list[IdentityViolation]) -> str:
+    return "\n".join(
+        f"  {v.amfi_code} {v.window} {v.identity}: reported={v.lhs:.6f} "
+        f"predicted={v.rhs:.6f} gap={v.gap:.6f}"
+        for v in violations
+    )
 
 
 class IndexAnomalyError(RuntimeError):
@@ -367,6 +387,15 @@ def run(
     artifact = assemble_universe(
         panels, as_of=as_of, category=CATEGORY, yardstick_code=yardstick_code
     )
+
+    violations: list[IdentityViolation] = []
+    for fund_entry in artifact["funds"]:
+        violations.extend(check_identities(fund_entry))
+    if violations:
+        raise IdentityCheckError(
+            f"{len(violations)} identity violation(s) detected — aborting:\n"
+            f"{_format_violations(violations)}"
+        )
 
     carried_commentary = 0
     if carry_commentary_path is not None:

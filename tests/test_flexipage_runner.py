@@ -30,7 +30,12 @@ from foliolens.ingest.scheme_master import SchemeMasterRecord, land_scheme_maste
 from foliolens.report.flexipage.assembly import RANK_SPECS
 from foliolens.report.flexipage.commentary import PROMPT_VERSION
 from foliolens.report.flexipage.commentary import run as run_commentary
-from foliolens.report.flexipage.runner import IndexAnomalyError, load_universe, run
+from foliolens.report.flexipage.runner import (
+    IdentityCheckError,
+    IndexAnomalyError,
+    load_universe,
+    run,
+)
 from foliolens.data_access import DataAccess
 from foliolens.returns.monthly import monthly_returns
 
@@ -682,3 +687,71 @@ def test_stale_fund_windows_null_fresh_fund_anchors_to_cohort_as_of(
         assert stale["metrics"][f"sharpe_{label}"] is None
         assert fresh["metrics"][f"volatility_{label}"] is not None
         assert fresh["metrics"][f"sharpe_{label}"] is not None
+
+
+# ---------------------------------------------------------------------------
+# B1 — identity checker wired into the runner (validation/identities.py):
+# every fund row is cross-checked after assembly, before write; a violation
+# aborts the whole build, no bypass.
+# ---------------------------------------------------------------------------
+
+
+def test_b1_fresh_zero_violations_on_fixture_universe(
+    tmp_path: Path, universe: dict[str, Path]
+) -> None:
+    """B1-fresh acceptance: the fixture-universe run should produce zero
+    identity violations. If this is red, it is reported verbatim (below) —
+    never made to pass by loosening ``validation/identities.py``'s tolerances
+    or adjusting this fixture.
+    """
+    out_path = tmp_path / "out" / "metrics.json"
+    try:
+        run(
+            universe["data_dir"],
+            out_path,
+            rf_path=universe["rf_path"],
+            benchmark_map_path=universe["benchmark_map_path"],
+        )
+    except IdentityCheckError as exc:
+        pytest.fail(
+            "B1-fresh is RED on the fixture universe -- reporting the "
+            f"violating rows verbatim, per spec (not adjusted):\n{exc}"
+        )
+
+
+def test_identity_violation_flips_sharpe_sign_aborts_build(
+    monkeypatch: pytest.MonkeyPatch, tmp_path: Path, universe: dict[str, Path]
+) -> None:
+    """B1-wiring acceptance: patch one assembled value (flip a fund's
+    ``sharpe_1Y`` sign, chosen because the sharpe identity holds cleanly on
+    this fixture at baseline — unlike alpha, see
+    ``test_b1_fresh_zero_violations_on_fixture_universe``) and assert the
+    build raises, listing that fund/window/identity.
+    """
+    import foliolens.report.flexipage.runner as runner_module
+
+    real_assemble_universe = runner_module.assemble_universe
+    target_code = "AAAA01"
+
+    def _corrupted_assemble_universe(panels: Any, **kwargs: Any) -> dict[str, Any]:
+        result = real_assemble_universe(panels, **kwargs)
+        fund = next(f for f in result["funds"] if f["amfi_code"] == target_code)
+        sharpe = fund["metrics"]["sharpe_1Y"]
+        assert sharpe is not None  # the mature fixture fund always has this
+        fund["metrics"]["sharpe_1Y"] = -sharpe
+        return result
+
+    monkeypatch.setattr(runner_module, "assemble_universe", _corrupted_assemble_universe)
+
+    out_path = tmp_path / "out" / "metrics.json"
+    with pytest.raises(IdentityCheckError) as exc_info:
+        run(
+            universe["data_dir"],
+            out_path,
+            rf_path=universe["rf_path"],
+            benchmark_map_path=universe["benchmark_map_path"],
+        )
+    message = str(exc_info.value)
+    assert target_code in message
+    assert "sharpe" in message
+    assert "1Y" in message

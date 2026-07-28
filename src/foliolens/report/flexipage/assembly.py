@@ -47,6 +47,7 @@ from foliolens.analytics import (
     category_aggregate,
     percentile_ranks,
     rank_history,
+    rolling_return,
 )
 from foliolens.analytics import relative as relative_metrics
 from foliolens.analytics.drawdown import underwater
@@ -379,6 +380,11 @@ def build_fund_panel(
         metrics[f"excess_return_{label}"] = _excess_return_scalar(
             fund.source, yardstick.source, label, as_of
         )
+        # Stored separately from excess_return (never just its subtrahend) so
+        # the identity checker (validation.identities) can re-derive excess
+        # from storage rather than trust a stored excess field verbatim.
+        metrics[f"benchmark_return_{label}"] = _engine_return(yardstick.source, label, as_of)
+        metrics[f"rf_{label}"] = _rf_return_scalar(rf_rs, months, as_of)
         metrics[f"tracking_error_{label}"] = _relative_scalar(
             relative_metrics.tracking_error, fund_rs, yardstick_rs, months, as_of
         )
@@ -420,6 +426,24 @@ def _excess_return_scalar(
     if fund_value is None or yardstick_value is None:
         return None
     return fund_value - yardstick_value
+
+
+def _rf_return_scalar(rf_rs: ReturnSeries, months: int, as_of: date) -> float | None:
+    """rf's own trailing annualised return, ending exactly at ``as_of``.
+
+    rf has no NAV ``.source`` (``SeriesInvestment`` — see ``model/investments``),
+    so the return-engine figure-of-record path used for the fund/benchmark
+    (:func:`_engine_return`) does not apply here; this reuses the existing
+    :func:`~foliolens.analytics.rolling.rolling_return` panel (the *same*
+    annualisation convention) rather than reimplementing it. ``None`` when
+    ``as_of`` is absent from the panel (rf's history does not reach it, or
+    the window is longer than rf's history).
+    """
+    panel = rolling_return(rf_rs, months)
+    if as_of not in panel.dates:
+        return None
+    idx = panel.dates.index(as_of)
+    return _safe_float(float(panel.values[idx]))
 
 
 def _metric_value(panel: FundPanel, key: str) -> float | None:
