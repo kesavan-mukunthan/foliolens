@@ -61,8 +61,11 @@ Each ≈ one 45-min session.
 - **Accept:** `test_decimal_roundtrip` green; spot-check 3 dates against AMFI published NAV.
 
 ### 0.4 Month-end base — Sonnet
-- Month-end logic lives on `NavSeries.month_end()` (`model/value_objects.py`): last NAV on/before calendar month-end; no look-ahead; incomplete leading/trailing months skipped, not fabricated. Daily retained.
-- **Accept:** `test_weekend_boundary` and `test_no_lookahead` green.
+- Month-end logic lived on `NavSeries.month_end()` (`model/value_objects.py`); superseded by the fix/month-end-migration rework — `NavSeries.month_end()` is **deleted**. The sole month-end rule is now `returns/monthly.month_end(nav, cal)`, stated normatively:
+  - **Completeness**: month `M` is emitted iff (a) `nav` carries a NAV dated *exactly* `cal.last_trading_day(M)` — the true last trading day of `M`, resolved from a `TradingCalendar` derived cross-sectionally (`returns/calendar.derive_calendar`), never assumed from the calendar days alone — **and** (b) at least one NAV is dated in the strictly next calendar month `M + 1`. Condition (b) is what makes the still-accumulating trailing month never emitted — no look-ahead, and no fabricated completeness for a month still in progress.
+  - **Relabel**: the emitted point is stamped on the true calendar month-end date of `M` (e.g. `2024-06-30`), not the trading day the NAV was actually dated on (e.g. `2024-06-28` if the 30th fell on a weekend) — so every emitted date is a genuine calendar month-end, comparable across funds and against externally-sourced monthly series (the rf column, TRI benchmarks) without a second resampling step.
+  - Daily NAV is retained unchanged; `monthly_returns(nav, cal)` layers simple returns on top of `month_end`, dropping any adjacent pair that isn't exactly one calendar month apart (a gap in the derived calendar never becomes a mislabelled multi-month return).
+- **Accept:** `tests/invariants/test_month_end.py` green — every monthly date is a calendar month-end, the trailing partial month is absent, adjacent months are exactly one month apart, and the cohort-calendar invariant (a fund lagging its cohort's last trading day loses that month, never silently reverting to its own).
 
 ### 0.5 Domain model + engine — Sonnet
 - `model/` (per `ARCHITECTURE.md`): `Investment`, value objects (`NavSeries`, `ReturnSeries`, `ReturnResult`, `Cashflow`), `ReturnSource` protocol + `PricedSource`; `ShareClass`/`Fund` concrete (Fund prices via a representative ShareClass). Stub `BlendSource`, `HeldSource`, `WeightPolicy`, holdings/`Cash` — defined, no logic. *(Historical: risk-metric methods were declared on the protocol here; this is superseded by `spec-analytics §0`, which withdraws them — analytics are now free functions over `ReturnSeries`, not protocol surface.)*
@@ -121,7 +124,7 @@ foliolens/
       land.py                 # raw NAV -> decimal128 parquet
     model/
       investments.py          # Investment protocol + ShareClass, Fund (concrete); Stock/Portfolio/Benchmark/Cash (stubs)
-      value_objects.py        # NavSeries (+ month_end), ReturnSeries, ReturnResult, ValueIndex, Cashflow
+      value_objects.py        # NavSeries, ReturnSeries (+ frequency), ReturnResult, ValueIndex, Cashflow
       sources.py              # ReturnSource protocol; PricedSource; HeldSource/BlendSource (stubs)
       weights.py              # WeightPolicy: Fixed/Drift/PIT (stubs)
       holdings.py             # Holding edge + DAG resolve (stub)
