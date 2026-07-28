@@ -8,7 +8,7 @@ it must never be deleted or "fixed" by editing the hardcoded numbers.
 """
 from __future__ import annotations
 
-from foliolens.validation.identities import check_identities
+from foliolens.validation.identities import _ratio_tolerance, check_identities
 
 
 def test_old_published_118424_values_violate_all_three_identities() -> None:
@@ -42,8 +42,10 @@ def test_old_published_118424_values_violate_all_three_identities() -> None:
         assert v.amfi_code == "118424"
         assert v.window == "1Y"
 
-    assert by_identity["sharpe"].gap > 0.4
-    assert by_identity["ir"].gap > 2.5
+    # Still fails at the scaled tolerances, not just the old flat ones: the
+    # gaps clear _ratio_tolerance computed from this row's own volatility/TE.
+    assert by_identity["sharpe"].gap > _ratio_tolerance(15.81 / 100)
+    assert by_identity["ir"].gap > _ratio_tolerance(2.33 / 100)
     assert by_identity["alpha"].gap > 0.04  # 4 pp, expressed as a fraction
 
 
@@ -64,6 +66,45 @@ def test_null_input_is_skipped_never_flagged() -> None:
         },
         "alpha": {"alpha_1Y": None},
     }
+    assert check_identities(row) == []
+
+
+def test_low_tracking_error_row_passes_scaled_but_would_fail_flat() -> None:
+    # Regression record of the D-run stop: the flat 0.15 IR tolerance
+    # aborted a real flexipage build with 59 identity violations, every one
+    # a low-tracking-error fund of exactly this shape -- a close
+    # benchmark-hugging fund with tracking_error ~= 2%. A ~1pp numerator
+    # convention gap (the same class of arithmetic/day-count slack
+    # _ALPHA_TOL already budgets for) divides through this small denominator
+    # into an IR gap of ~0.5 -- comfortably inside the scaled tolerance
+    # (0.03 / 0.02 = 1.5) but well outside the old flat 0.15. This is the
+    # shape of fund that the flat tolerance over-flagged in production
+    # before the scaled tolerance landed.
+    fund_return, rf_return, volatility = 0.10, 0.06, 0.15
+    benchmark_return, tracking_error, beta = 0.09, 0.02, 0.95
+    sharpe = (fund_return - rf_return) / volatility
+    alpha = (fund_return - benchmark_return) + (1.0 - beta) * (benchmark_return - rf_return)
+    true_ir = (fund_return - benchmark_return) / tracking_error
+    reported_ir = true_ir - (0.01 / tracking_error)  # 1pp numerator convention gap
+
+    row = {
+        "amfi_code": "TE0002",
+        "metrics": {
+            "return_1Y": fund_return,
+            "volatility_1Y": volatility,
+            "sharpe_1Y": sharpe,
+            "benchmark_return_1Y": benchmark_return,
+            "beta_1Y": beta,
+            "tracking_error_1Y": tracking_error,
+            "information_ratio_1Y": reported_ir,
+            "rf_1Y": rf_return,
+        },
+        "alpha": {"alpha_1Y": {"value": alpha}},
+    }
+
+    gap = abs(reported_ir - true_ir)
+    assert gap > 0.15  # would have failed the old flat IR tolerance
+    assert gap < _ratio_tolerance(tracking_error)  # passes the new scaled tolerance
     assert check_identities(row) == []
 
 
