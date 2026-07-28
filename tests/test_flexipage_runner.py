@@ -39,7 +39,7 @@ from foliolens.report.flexipage.runner import (
 from foliolens.data_access import DataAccess
 from foliolens.returns.monthly import monthly_returns
 
-SCHEMA_PATH = Path(__file__).parent.parent / "schemas" / "flexipage-2.schema.json"
+SCHEMA_PATH = Path(__file__).parent.parent / "schemas" / "flexipage-3.schema.json"
 
 _START = date(2018, 6, 30)
 _MATURE_DAYS = 8 * 365  # ~8 years daily -> 96 monthly points; full 5Y panels
@@ -220,7 +220,7 @@ def test_every_universe_fund_present(artifact: dict[str, Any]) -> None:
 
 
 def test_schema_version_and_yardstick(artifact: dict[str, Any]) -> None:
-    assert artifact["schema_version"] == "flexipage-2"
+    assert artifact["schema_version"] == "flexipage-3"
     assert artifact["universe"]["yardstick"] == "NIFTY500TRI"
     for f in artifact["funds"]:
         assert f["benchmark"]["yardstick"] == "NIFTY500TRI"

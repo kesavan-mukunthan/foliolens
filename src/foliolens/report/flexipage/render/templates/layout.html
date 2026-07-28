@@ -110,6 +110,12 @@
 {% block content %}{% endblock %}
 </main>
 <footer class="site-footer">
+  {% if rf_disclosure %}
+  <p class="rf-disclosure">Risk-free basis: {{ rf_disclosure.series_name }}
+    ({{ rf_disclosure.frequency }}); last observation {{ rf_disclosure.last_date }}.
+    Annualised risk-free rate by window &mdash;
+    {% for w in windows %}{{ w }}: {{ rf_disclosure.levels[w]|pct }}{% if not loop.last %}; {% endif %}{% endfor %}.</p>
+  {% endif %}
   <p class="footnote">{{ footnote }}</p>
   <p class="disclaimer">{{ disclaimer }}</p>
 </footer>

@@ -96,6 +96,11 @@ def render_site(metrics_path: Path, out_dir: Path) -> RenderSummary:
         "nav_funds": presentation.nav_entries(funds),
         "footnote": SURVIVORSHIP_FOOTNOTE,
         "disclaimer": DISCLAIMER,
+        # rf disclosure (D2d) lives on every page footer. Read defensively:
+        # a pre-flexipage-3 artifact has no universe.rf, and the footer block
+        # simply doesn't render for it.
+        "rf_disclosure": data.get("universe", {}).get("rf"),
+        "windows": presentation.WINDOWS,
     }
 
     index_html = env.get_template("index.html").render(
@@ -131,7 +136,6 @@ def render_site(metrics_path: Path, out_dir: Path) -> RenderSummary:
             category_benchmark_display=presentation.benchmark_display_name(
                 fund["benchmark"]["yardstick"]
             ),
-            windows=presentation.WINDOWS,
             calendar_years=calendar_years,
             metrics_rows=presentation.build_metrics_rows(fund["metrics"]),
             alpha_row=alpha_row,
