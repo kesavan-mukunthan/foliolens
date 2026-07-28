@@ -22,6 +22,8 @@ from . import charts, presentation
 from .pdf import render_pdfs
 from .strings import (
     DISCLAIMER,
+    IIMA_CITATION_TEXT,
+    IIMA_CITATION_URL,
     PERCENTILE_FOOTNOTE,
     SURVIVORSHIP_FOOTNOTE,
     T_STAT_SUPPRESSION_FOOTNOTE,
@@ -91,6 +93,7 @@ def render_site(metrics_path: Path, out_dir: Path) -> RenderSummary:
     shutil.copy(_STATIC_DIR / "sort.js", static_out / "sort.js")
 
     env = _make_env()
+    rf_disclosure = data.get("universe", {}).get("rf")
     common_ctx = {
         "as_of": data["as_of"],
         "nav_funds": presentation.nav_entries(funds),
@@ -99,7 +102,18 @@ def render_site(metrics_path: Path, out_dir: Path) -> RenderSummary:
         # rf disclosure (D2d) lives on every page footer. Read defensively:
         # a pre-flexipage-3 artifact has no universe.rf, and the footer block
         # simply doesn't render for it.
-        "rf_disclosure": data.get("universe", {}).get("rf"),
+        "rf_disclosure": rf_disclosure,
+        # rf carry-forward line (D2d extension): None on a pre-flexipage-4
+        # artifact (no `extended` key) or when rf isn't currently extended.
+        "rf_extension_line": presentation.rf_extension_line(
+            (rf_disclosure or {}).get("extended")
+        ),
+        # IIM-A citation: a licence condition of the data source's terms of
+        # use (ingest/iima.py module docstring), not extension-dependent —
+        # rendered wherever the rf disclosure itself is (i.e. every page
+        # rendering an rf-derived metric).
+        "iima_citation_text": IIMA_CITATION_TEXT,
+        "iima_citation_url": IIMA_CITATION_URL,
         "windows": presentation.WINDOWS,
     }
 

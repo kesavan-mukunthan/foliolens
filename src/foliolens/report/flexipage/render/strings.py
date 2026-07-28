@@ -50,3 +50,39 @@ T_STAT_SUPPRESSION_FOOTNOTE = "suppressed: insufficient sample (n < 24 months)"
 #: is a one-line edit here, never a logic change. Correct only while the
 #: stated rate holds over the carried period; update alongside any move.
 RF_EXTENSION_REPO_CLAUSE = "RBI repo held at 5.25% over the period"
+
+#: Footer line for an active rf carry-forward at or below
+#: :data:`~foliolens.report.flexipage.render.presentation.RF_EXTENSION_ESCALATION_MONTHS`
+#: carried months (D2d extension). Formatted with the artifact's own
+#: ``extended`` fields — never hardcoded dates. ``basis`` is the fully-built
+#: sentence already stored in the artifact (``assembly._rf_extension_basis``),
+#: not re-interpolated here.
+RF_EXTENSION_FOOTER_TEMPLATE = (
+    "rf extended flat from {last_published} through {extended_through} "
+    "({n} months) — {basis}."
+)
+
+#: Escalated variant once the carry-forward exceeds
+#: :data:`~foliolens.report.flexipage.render.presentation.RF_EXTENSION_ESCALATION_MONTHS`
+#: months — same disclosure, stronger wording naming the risk-adjusted
+#: figures directly affected. Verbatim; an executable test asserts this
+#: exact wording.
+RF_EXTENSION_ESCALATED_TEMPLATE = (
+    "rf carried forward {n} months — risk-adjusted figures assume short "
+    "rates unchanged since {last_published}."
+)
+
+#: IIM-A citation (licence condition of the factor library's terms of use —
+#: CLAUDE.md: "citation, never republished as data"; see ``ingest/iima.py``'s
+#: module docstring). Verbatim; rendered once per page, in the same footer
+#: block as the rf disclosure (D2d), unconditional on whether rf is currently
+#: extended.
+IIMA_CITATION_TEXT = (
+    'Risk-free series: Agarwalla, S. K., Jacob, J. and Varma, J. R. (2013), '
+    '"Four factor model in Indian equities market", W.P. No. 2013-09-05, '
+    "Indian Institute of Management, Ahmedabad."
+)
+IIMA_CITATION_URL = (
+    "https://faculty.iima.ac.in/~iffm/Indian-Fama-French-Momentum/"
+    "four-factors-India-90s-onwards-IIM-WP-Version.pdf"
+)
