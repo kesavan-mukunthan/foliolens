@@ -17,7 +17,7 @@ import numpy as np
 from foliolens.model.value_objects import ReturnSeries
 
 from ..returns.frequency import Frequency
-from .series_ops import require_frequency
+from .series_ops import InsufficientHistoryError, require_frequency
 
 
 def pct_positive(rs: ReturnSeries) -> float:
@@ -27,7 +27,7 @@ def pct_positive(rs: ReturnSeries) -> float:
     """
     require_frequency(rs, Frequency.MONTHLY)
     if len(rs) < 1:
-        raise ValueError("pct_positive needs >= 1 return")
+        raise InsufficientHistoryError(1, len(rs), "pct_positive needs >= 1 return")
     return float(np.mean(rs.values > 0.0))
 
 
@@ -35,7 +35,7 @@ def best_period(rs: ReturnSeries) -> float:
     """The single largest per-period return in the series."""
     require_frequency(rs, Frequency.MONTHLY)
     if len(rs) < 1:
-        raise ValueError("best_period needs >= 1 return")
+        raise InsufficientHistoryError(1, len(rs), "best_period needs >= 1 return")
     return float(np.max(rs.values))
 
 
@@ -43,7 +43,7 @@ def worst_period(rs: ReturnSeries) -> float:
     """The single smallest (most negative) per-period return in the series."""
     require_frequency(rs, Frequency.MONTHLY)
     if len(rs) < 1:
-        raise ValueError("worst_period needs >= 1 return")
+        raise InsufficientHistoryError(1, len(rs), "worst_period needs >= 1 return")
     return float(np.min(rs.values))
 
 
@@ -58,7 +58,7 @@ def skew(rs: ReturnSeries) -> float:
     require_frequency(rs, Frequency.MONTHLY)
     n = len(rs)
     if n < 3:
-        raise ValueError(f"skew needs >= 3 returns, got {n}")
+        raise InsufficientHistoryError(3, n, f"skew needs >= 3 returns, got {n}")
     values = rs.values
     deviations = values - np.mean(values)
     m2 = float(np.mean(deviations**2))
@@ -78,7 +78,7 @@ def kurtosis(rs: ReturnSeries) -> float:
     require_frequency(rs, Frequency.MONTHLY)
     n = len(rs)
     if n < 4:
-        raise ValueError(f"kurtosis needs >= 4 returns, got {n}")
+        raise InsufficientHistoryError(4, n, f"kurtosis needs >= 4 returns, got {n}")
     values = rs.values
     deviations = values - np.mean(values)
     m2 = float(np.mean(deviations**2))

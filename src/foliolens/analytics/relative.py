@@ -46,7 +46,7 @@ from foliolens.model.value_objects import ReturnSeries
 
 from .metrics import sharpe, volatility
 from .rolling import rolling_return
-from .series_ops import align, align_dated
+from .series_ops import InsufficientHistoryError, align, align_dated
 
 _Array = npt.NDArray[np.float64]
 
@@ -66,7 +66,9 @@ def excess_return(fund: ReturnSeries, benchmark: ReturnSeries) -> ReturnSeries:
     """
     dates, r, rb = align_dated(fund, benchmark)
     if len(dates) < 1:
-        raise ValueError("excess_return needs >= 1 overlapping period")
+        raise InsufficientHistoryError(
+            1, len(dates), "excess_return needs >= 1 overlapping period"
+        )
     return ReturnSeries(dates=dates, values=r - rb, frequency=fund.frequency, base=fund.base)
 
 
@@ -97,7 +99,9 @@ def information_ratio(fund: ReturnSeries, benchmark: ReturnSeries) -> float:
     """
     r, rb = align(fund, benchmark)
     if len(r) < 2:
-        raise ValueError(f"information_ratio needs >= 2 overlapping periods, got {len(r)}")
+        raise InsufficientHistoryError(
+            2, len(r), f"information_ratio needs >= 2 overlapping periods, got {len(r)}"
+        )
     active = r - rb
     periods_per_year = fund.frequency.periods_per_year
     te = float(np.std(active, ddof=1)) * np.sqrt(periods_per_year)
@@ -136,7 +140,9 @@ def beta(fund: ReturnSeries, benchmark: ReturnSeries) -> float:
     """
     r, rb = align(fund, benchmark)
     if len(r) < 2:
-        raise ValueError(f"beta needs >= 2 overlapping periods, got {len(r)}")
+        raise InsufficientHistoryError(
+            2, len(r), f"beta needs >= 2 overlapping periods, got {len(r)}"
+        )
     return _beta(r, rb)
 
 
@@ -144,7 +150,9 @@ def correlation(fund: ReturnSeries, benchmark: ReturnSeries) -> float:
     """Pearson correlation of fund and benchmark returns over the overlap."""
     r, rb = align(fund, benchmark)
     if len(r) < 2:
-        raise ValueError(f"correlation needs >= 2 overlapping periods, got {len(r)}")
+        raise InsufficientHistoryError(
+            2, len(r), f"correlation needs >= 2 overlapping periods, got {len(r)}"
+        )
     if np.std(r) == 0.0 or np.std(rb) == 0.0:
         raise ValueError("correlation undefined: a series has zero variance")
     return float(np.corrcoef(r, rb)[0, 1])
@@ -211,7 +219,9 @@ def jensens_alpha(
     _, rb, _ = align_dated(bench_paired, rf)
     n = len(dates)
     if n < 3:
-        raise ValueError(f"jensens_alpha needs >= 3 overlapping periods, got {n}")
+        raise InsufficientHistoryError(
+            3, n, f"jensens_alpha needs >= 3 overlapping periods, got {n}"
+        )
 
     y = r - f            # excess fund return
     x = rb - f           # excess benchmark return
@@ -261,7 +271,9 @@ def treynor(fund: ReturnSeries, benchmark: ReturnSeries, rf: ReturnSeries) -> fl
     """
     r, f = align(fund, rf)
     if len(r) < 2:
-        raise ValueError(f"treynor needs >= 2 overlapping rf periods, got {len(r)}")
+        raise InsufficientHistoryError(
+            2, len(r), f"treynor needs >= 2 overlapping rf periods, got {len(r)}"
+        )
     b = beta(fund, benchmark)
     if b == 0.0:
         raise ValueError("treynor undefined: beta is zero")
@@ -325,7 +337,7 @@ def hit_rate(fund: ReturnSeries, benchmark: ReturnSeries) -> float:
     """
     r, rb = align(fund, benchmark)
     if len(r) < 1:
-        raise ValueError("hit_rate needs >= 1 overlapping period")
+        raise InsufficientHistoryError(1, len(r), "hit_rate needs >= 1 overlapping period")
     return float(np.mean(r > rb))
 
 

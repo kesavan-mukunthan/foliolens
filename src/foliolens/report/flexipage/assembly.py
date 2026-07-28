@@ -31,10 +31,33 @@ daily-basis ``max_drawdown_SI`` already in ``metrics``). Both are derived
 straight through the existing ``returns/convert.to_index`` seam — no new
 spec-analytics metric convention, only a different base level and a longer
 (unwindowed) slice than the rolling panels use.
+
+Schema (``SCHEMA_VERSION = "flexipage-2"``): each fund entry gains a
+``windows`` block, one entry per trailing window (``"1Y"``/``"3Y"``/``"5Y"``,
+:func:`_window_disclosure`) — effective-n disclosure, never re-derived from
+NAV:
+
+* ``n_months`` — the fund's own trailing-window point count.
+* ``n_overlap_rf`` / ``n_overlap_benchmark`` — the post-``align`` pair count
+  a two-series metric over this window actually receives, computed over the
+  *same* panels the metrics themselves read
+  (:func:`~foliolens.analytics.series_ops.align_dated`). A gap between
+  ``n_months`` and an overlap count is the exact alignment shortfall a metric
+  silently absorbed — Phase A's alignment fix, restated as an ongoing,
+  checkable invariant rather than a one-off patch.
+* ``refused`` — ``{metric_name: reason}`` for every metric nulled by an
+  ``InsufficientHistoryError`` in this window (``analytics/series_ops.py``);
+  a null in the output is always attributable to a stated reason, never a
+  bare, unexplained ``None``.
+
+All three counts are ``0`` (not ``null``) when the window itself doesn't
+exist for this fund (history doesn't reach ``as_of`` with enough points) — a
+count of zero is the honest, explicit answer.
 """
 from __future__ import annotations
 
 import math
+from collections.abc import Mapping
 from dataclasses import dataclass
 from datetime import date
 from decimal import Decimal
@@ -47,6 +70,7 @@ from foliolens.analytics import (
     category_aggregate,
     percentile_ranks,
     rank_history,
+    rolling_return,
 )
 from foliolens.analytics import relative as relative_metrics
 from foliolens.analytics.drawdown import underwater
@@ -62,7 +86,9 @@ from foliolens.returns.engine import period_return
 from foliolens.returns.frequency import Frequency
 
 #: Artifact schema version for this page's durable output (``spec-flexicap-page §3``).
-SCHEMA_VERSION = "flexipage-1"
+#: Bumped to ``flexipage-2`` for the per-fund ``windows`` disclosure block
+#: (effective-n + refused, see the module docstring's *Schema* section).
+SCHEMA_VERSION = "flexipage-2"
 
 #: Calendar years rendered per fund (``spec-flexicap-page §2``).
 CALENDAR_YEARS: tuple[int, ...] = (2023, 2024, 2025)
@@ -319,6 +345,66 @@ class FundPanel:
     alpha: dict[str, dict[str, object] | None]
     rolling: dict[str, tuple[SeriesPoint, ...]]
     series: dict[str, object]
+    windows: dict[str, dict[str, object]]
+
+
+def _window_refused(label: str, refused_by_metric: Mapping[str, str]) -> dict[str, str]:
+    """This window's slice of ``build_metrics``'s flat ``refused`` map.
+
+    ``refused_by_metric`` is keyed by the full metric name (e.g.
+    ``"sharpe_1Y"``); this strips the ``_{label}`` suffix so the per-window
+    block reads ``{"sharpe": "insufficient_history(...)"}`` rather than
+    redundantly repeating the window it is already nested under. Confined to
+    the §5 core metrics ``build_metrics`` itself computes (volatility,
+    sharpe, sortino, calmar, downside_deviation, return_*) — the
+    flexipage-specific relative-window metrics (tracking_error,
+    information_ratio, beta, alpha) are computed separately in this module
+    and are not yet attributable this way (their own ``except ValueError``
+    guards are out of this task's B3 scope).
+    """
+    suffix = f"_{label}"
+    return {
+        key[: -len(suffix)]: reason
+        for key, reason in refused_by_metric.items()
+        if key.endswith(suffix)
+    }
+
+
+def _window_disclosure(
+    fund_rs: ReturnSeries,
+    rf_rs: ReturnSeries,
+    yardstick_rs: ReturnSeries,
+    months: int,
+    as_of: date,
+    *,
+    label: str,
+    refused_by_metric: Mapping[str, str],
+) -> dict[str, object]:
+    """Effective-n disclosure for one window: how many points a two-series
+    metric over this window actually had to work with, post-align.
+
+    ``n_months`` is the fund's own trailing-window point count;
+    ``n_overlap_rf`` / ``n_overlap_benchmark`` are the post-``align`` pair
+    counts :func:`~foliolens.analytics.series_ops.align_dated` actually hands
+    a two-series metric for this window — computed over the *same* panels
+    the metrics receive (never re-derived from NAV), so a gap between
+    ``n_months`` and an overlap count is the exact alignment shortfall a
+    metric silently absorbed. All zero when the window itself doesn't exist
+    (the fund's history doesn't reach ``as_of`` with ``months`` points) — a
+    count of zero is the honest answer, not a null.
+    """
+    refused = _window_refused(label, refused_by_metric)
+    sliced = trailing_anchored(fund_rs, months, as_of)
+    if sliced is None:
+        return {"n_months": 0, "n_overlap_rf": 0, "n_overlap_benchmark": 0, "refused": refused}
+    n_overlap_rf = len(align_dated(sliced, rf_rs)[0])
+    n_overlap_benchmark = len(align_dated(sliced, yardstick_rs)[0])
+    return {
+        "n_months": len(sliced),
+        "n_overlap_rf": n_overlap_rf,
+        "n_overlap_benchmark": n_overlap_benchmark,
+        "refused": refused,
+    }
 
 
 def build_fund_panel(
@@ -379,6 +465,11 @@ def build_fund_panel(
         metrics[f"excess_return_{label}"] = _excess_return_scalar(
             fund.source, yardstick.source, label, as_of
         )
+        # Stored separately from excess_return (never just its subtrahend) so
+        # the identity checker (validation.identities) can re-derive excess
+        # from storage rather than trust a stored excess field verbatim.
+        metrics[f"benchmark_return_{label}"] = _engine_return(yardstick.source, label, as_of)
+        metrics[f"rf_{label}"] = _rf_return_scalar(rf_rs, months, as_of)
         metrics[f"tracking_error_{label}"] = _relative_scalar(
             relative_metrics.tracking_error, fund_rs, yardstick_rs, months, as_of
         )
@@ -389,6 +480,14 @@ def build_fund_panel(
             relative_metrics.beta, fund_rs, yardstick_rs, months, as_of
         )
         alpha[f"alpha_{label}"] = _alpha_for_window(fund_rs, yardstick_rs, rf_rs, months, as_of)
+
+    windows = {
+        label: _window_disclosure(
+            fund_rs, rf_rs, yardstick_rs, months, as_of,
+            label=label, refused_by_metric=mr.refused,
+        )
+        for label, months in _RELATIVE_WINDOWS.items()
+    }
 
     return FundPanel(
         amfi_code=amfi_code,
@@ -402,6 +501,7 @@ def build_fund_panel(
         alpha=alpha,
         rolling=rolling,
         series=series,
+        windows=windows,
     )
 
 
@@ -420,6 +520,24 @@ def _excess_return_scalar(
     if fund_value is None or yardstick_value is None:
         return None
     return fund_value - yardstick_value
+
+
+def _rf_return_scalar(rf_rs: ReturnSeries, months: int, as_of: date) -> float | None:
+    """rf's own trailing annualised return, ending exactly at ``as_of``.
+
+    rf has no NAV ``.source`` (``SeriesInvestment`` — see ``model/investments``),
+    so the return-engine figure-of-record path used for the fund/benchmark
+    (:func:`_engine_return`) does not apply here; this reuses the existing
+    :func:`~foliolens.analytics.rolling.rolling_return` panel (the *same*
+    annualisation convention) rather than reimplementing it. ``None`` when
+    ``as_of`` is absent from the panel (rf's history does not reach it, or
+    the window is longer than rf's history).
+    """
+    panel = rolling_return(rf_rs, months)
+    if as_of not in panel.dates:
+        return None
+    idx = panel.dates.index(as_of)
+    return _safe_float(float(panel.values[idx]))
 
 
 def _metric_value(panel: FundPanel, key: str) -> float | None:
@@ -543,6 +661,7 @@ def assemble_universe(
                 },
                 "series": p.series,
                 "ranks": fund_ranks,
+                "windows": p.windows,
                 "commentary": None,
             }
         )
