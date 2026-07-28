@@ -226,6 +226,25 @@ def test_schema_version_and_yardstick(artifact: dict[str, Any]) -> None:
         assert f["benchmark"]["yardstick"] == "NIFTY500TRI"
 
 
+def test_rf_disclosure_block_populated(artifact: dict[str, Any]) -> None:
+    """D2d: the real build populates ``universe.rf`` off the rf Investment and
+    its own series — identity fields plus an annualised level per rendered
+    window (all present on this mature fixture, whose rf reaches as_of).
+    """
+    rf = artifact["universe"]["rf"]
+    assert rf["series_name"] == "rf-iima-91d-tbill"
+    assert rf["frequency"] == "monthly"
+    assert rf["last_date"] is not None
+    assert set(rf["levels"]) == {"1Y", "3Y", "5Y"}
+    assert all(rf["levels"][w] is not None for w in ("1Y", "3Y", "5Y"))
+    # rf disclosed per window == the per-fund rf_{window} metric it was measured
+    # against (same _rf_return_scalar pathway), so the footer cannot drift from
+    # the metrics it annotates.
+    for fund in artifact["funds"]:
+        for w in ("1Y", "3Y", "5Y"):
+            assert rf["levels"][w] == fund["metrics"][f"rf_{w}"]
+
+
 # ---------------------------------------------------------------------------
 # Tier-fallback annotation (§1)
 # ---------------------------------------------------------------------------
