@@ -41,8 +41,14 @@ from foliolens.benchmark_map import (
     TIER1,
 )
 from foliolens.data_access import DATA_DIR_ENV_VAR, DataAccess, default_data_dir
-from foliolens.ingest.iima import rf_investment
-from foliolens.model.investments import Benchmark, ShareClass, benchmark_from_index, share_class_from_nav
+from foliolens.ingest.iima import extend_rf, rf_investment
+from foliolens.model.investments import (
+    Benchmark,
+    SeriesInvestment,
+    ShareClass,
+    benchmark_from_index,
+    share_class_from_nav,
+)
 from foliolens.model.value_objects import NavSeries
 from foliolens.returns.calendar import TradingCalendar, calendar_from_dates
 from foliolens.returns.frequency import Frequency
@@ -313,6 +319,12 @@ def run(
     empty, no fund loads, no month-end reaches the 50% threshold, or
     failures exceed :data:`MAX_FAILURE_RATE` of the cohort.
 
+    rf is carried flat past its last published month, through ``as_of``, when
+    the IIM-A source lags (``ingest.iima.extend_rf``) — never written back to
+    the rf CSV, so the next refresh self-heals with no cleanup. The resulting
+    ``RfExtension`` (or ``None``) flows straight into the artifact's rf
+    disclosure block (D2d extension) rather than being re-derived from it.
+
     ``carry_commentary_path``, when given, points at a previous build's
     ``metrics.json``; matching-version commentary blocks are copied onto the
     freshly-assembled artifact by ``amfi_code`` before it's written
@@ -363,6 +375,16 @@ def run(
             )
         as_of = max(qualifying)
 
+    # rf carry-forward (D2d extension, ``ingest.iima.extend_rf``): IIM-A's
+    # roughly-annual cadence routinely leaves the published series short of
+    # this run's as_of. Extension happens here, at load — never written back
+    # to the rf CSV — so the next IIM-A refresh self-heals with no cleanup.
+    # ``rf`` is rebound to the extended Investment so every downstream reader
+    # (fund panels below, the disclosure block) sees the carried months too.
+    rf_rs, rf_extension = extend_rf(rf.returns(Frequency.MONTHLY), as_of)
+    if rf_extension is not None:
+        rf = SeriesInvestment(id=rf.id, returns_series=rf_rs)
+
     tier1_landed_cache: dict[str, bool] = {}
     panels: list[FundPanel] = []
     for row, fund in loaded:
@@ -412,7 +434,7 @@ def run(
         as_of=as_of,
         category=CATEGORY,
         yardstick_code=yardstick_code,
-        rf_disclosure=build_rf_disclosure(rf, as_of),
+        rf_disclosure=build_rf_disclosure(rf, as_of, rf_extension),
     )
 
     violations: list[IdentityViolation] = []

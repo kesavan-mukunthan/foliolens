@@ -15,11 +15,13 @@ from datetime import date
 
 import numpy as np
 
+from foliolens.ingest.iima import RfExtension
 from foliolens.model.investments import SeriesInvestment
 from foliolens.report.flexipage.assembly import (
     _window_disclosure,
     _window_refused,
     build_fund_panel,
+    build_rf_disclosure,
 )
 from foliolens.returns.frequency import Frequency
 from fixtures import daily_shareclass, returns_series
@@ -144,3 +146,39 @@ def test_build_fund_panel_carries_windows_block_for_a_mature_fund() -> None:
         assert block["n_months"] > 0
         assert block["n_overlap_rf"] == block["n_months"]
         assert block["n_overlap_benchmark"] == block["n_months"]
+
+
+# ---------------------------------------------------------------------------
+# build_rf_disclosure — extended sub-block (D2d extension, flexipage-4)
+# ---------------------------------------------------------------------------
+
+
+def test_rf_disclosure_extended_absent_when_no_extension() -> None:
+    rf = _series_investment(returns_series(np.full(36, 0.003)), id="rf")
+    as_of = rf.returns(Frequency.MONTHLY).dates[-1]
+
+    disclosure = build_rf_disclosure(rf, as_of, None)
+
+    assert disclosure["extended"] is None
+
+
+def test_rf_disclosure_extended_present_with_correct_fields() -> None:
+    rf = _series_investment(returns_series(np.full(36, 0.003)), id="rf")
+    as_of = rf.returns(Frequency.MONTHLY).dates[-1]
+    extension = RfExtension(
+        last_published=date(2025, 12, 31),
+        extended_through=date(2026, 3, 31),
+        n_extended=3,
+        carried_monthly_value=0.003,
+    )
+
+    disclosure = build_rf_disclosure(rf, as_of, extension)
+
+    extended = disclosure["extended"]
+    assert set(extended) == {"last_published", "extended_through", "n_extended", "basis"}
+    assert extended["last_published"] == "2025-12-31"
+    assert extended["extended_through"] == "2026-03-31"
+    assert extended["n_extended"] == 3
+    assert "2025-12-31" in extended["basis"]
+    assert "carried forward" in extended["basis"]
+    assert "RBI repo" in extended["basis"]

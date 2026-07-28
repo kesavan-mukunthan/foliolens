@@ -43,3 +43,10 @@ PERCENTILE_FOOTNOTE = (
 #: — the executable test asserts this exact string. The 24-month threshold
 #: itself lives in :data:`foliolens.report.flexipage.render.presentation.T_STAT_MIN_MONTHS`.
 T_STAT_SUPPRESSION_FOOTNOTE = "suppressed: insufficient sample (n < 24 months)"
+
+#: Repo-rate clause appended to the rf carry-forward's disclosed basis
+#: (D2d extension, ``report/flexipage/assembly.py``'s ``_rf_extension_basis``).
+#: A plain string — not derived from any object — so a future RBI repo move
+#: is a one-line edit here, never a logic change. Correct only while the
+#: stated rate holds over the carried period; update alongside any move.
+RF_EXTENSION_REPO_CLAUSE = "RBI repo held at 5.25% over the period"

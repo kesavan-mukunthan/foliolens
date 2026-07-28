@@ -1,0 +1,255 @@
+{
+  "$schema": "https://json-schema.org/draft/2020-12/schema",
+  "$id": "https://foliolens.internal/schemas/flexipage-4.schema.json",
+  "title": "flexipage-4 metrics.json",
+  "description": "spec-flexicap-page §3 durable artifact, F1 (batch runner) shape. v4 adds the rf block's `extended` sub-block (D2d extension): provenance for a carry-forward past rf's last published month (`ingest.iima.extend_rf`), nullable, present whenever this run's as_of outran the published series. v3 adds the universe-level `rf` disclosure block (D2d): the risk-free series' identity and its annualised level per rendered window, for the page-footer rf disclosure. v2 added the per-fund `windows` effective-n/refused disclosure block (B2/B3).",
+  "type": "object",
+  "required": ["schema_version", "as_of", "universe", "funds"],
+  "additionalProperties": false,
+  "properties": {
+    "schema_version": { "const": "flexipage-4" },
+    "as_of": { "type": "string", "format": "date" },
+    "universe": {
+      "type": "object",
+      "required": ["category", "count", "yardstick", "aggregates", "rf"],
+      "additionalProperties": false,
+      "properties": {
+        "category": { "type": "string" },
+        "count": { "type": "integer", "minimum": 0 },
+        "yardstick": { "type": "string" },
+        "aggregates": {
+          "type": "object",
+          "additionalProperties": { "$ref": "#/$defs/aggregate" }
+        },
+        "rf": { "$ref": "#/$defs/rfBlock" }
+      }
+    },
+    "funds": {
+      "type": "array",
+      "items": { "$ref": "#/$defs/fundEntry" }
+    }
+  },
+  "$defs": {
+    "nullableNumber": {
+      "type": ["number", "null"]
+    },
+    "aggregate": {
+      "type": "object",
+      "required": ["median", "q1", "q3"],
+      "additionalProperties": false,
+      "properties": {
+        "median": { "$ref": "#/$defs/nullableNumber" },
+        "q1": { "$ref": "#/$defs/nullableNumber" },
+        "q3": { "$ref": "#/$defs/nullableNumber" }
+      }
+    },
+    "rfBlock": {
+      "description": "Risk-free disclosure (D2d): the rf series' identity plus its annualised level per rendered window. series_name/frequency/last_date are read off the rf Investment; each level in `levels` is the annualised rf rate the same window's metrics were measured against (via `_rf_return_scalar`), or null when rf history does not reach as_of. `extended` (v4) is the carry-forward provenance, null when rf's own history already reaches as_of unextended.",
+      "type": "object",
+      "required": ["series_name", "frequency", "last_date", "levels", "extended"],
+      "additionalProperties": false,
+      "properties": {
+        "series_name": { "type": "string" },
+        "frequency": { "type": "string" },
+        "last_date": { "type": ["string", "null"], "format": "date" },
+        "levels": {
+          "type": "object",
+          "additionalProperties": { "$ref": "#/$defs/nullableNumber" }
+        },
+        "extended": {
+          "anyOf": [{ "$ref": "#/$defs/rfExtensionBlock" }, { "type": "null" }]
+        }
+      }
+    },
+    "rfExtensionBlock": {
+      "description": "rf carry-forward provenance (D2d extension, `ingest.iima.extend_rf` / `RfExtension`): present whenever this run's as_of outran the published rf series. last_published/extended_through are calendar month-end dates; n_extended is the count of carried months (capped at RF_EXTENSION_CAP_MONTHS=12); basis is the fully-built disclosure sentence (never a template re-interpolated by the reader).",
+      "type": "object",
+      "required": ["last_published", "extended_through", "n_extended", "basis"],
+      "additionalProperties": false,
+      "properties": {
+        "last_published": { "type": "string", "format": "date" },
+        "extended_through": { "type": "string", "format": "date" },
+        "n_extended": { "type": "integer", "minimum": 1, "maximum": 12 },
+        "basis": { "type": "string" }
+      }
+    },
+    "benchmarkBlock": {
+      "type": "object",
+      "required": ["stated", "tier", "yardstick"],
+      "additionalProperties": false,
+      "properties": {
+        "stated": { "type": ["string", "null"] },
+        "tier": { "type": ["string", "null"] },
+        "yardstick": { "type": "string" }
+      }
+    },
+    "seriesPoint": {
+      "type": "object",
+      "required": ["date", "value"],
+      "additionalProperties": false,
+      "properties": {
+        "date": { "type": "string", "format": "date" },
+        "value": { "type": "number" }
+      }
+    },
+    "rankHistoryPoint": {
+      "type": "object",
+      "required": ["date", "pct"],
+      "additionalProperties": false,
+      "properties": {
+        "date": { "type": "string", "format": "date" },
+        "pct": {
+          "type": "number",
+          "minimum": 0,
+          "maximum": 100,
+          "description": "Percentile rank at this date: lower = better; 1 ≈ top of cohort."
+        }
+      }
+    },
+    "rankEntry": {
+      "type": "object",
+      "required": ["pct", "history"],
+      "additionalProperties": false,
+      "properties": {
+        "pct": {
+          "anyOf": [
+            { "type": "number", "minimum": 0, "maximum": 100 },
+            { "type": "null" }
+          ],
+          "description": "Latest percentile rank: lower = better; 1 ≈ top of cohort. Null when the fund has no value for this metric-window."
+        },
+        "history": {
+          "type": "array",
+          "items": { "$ref": "#/$defs/rankHistoryPoint" }
+        }
+      }
+    },
+    "alphaResult": {
+      "type": "object",
+      "required": ["value", "t_stat", "n", "window_start", "window_end"],
+      "additionalProperties": false,
+      "properties": {
+        "value": { "type": "number" },
+        "t_stat": { "type": "number" },
+        "n": { "type": "integer", "minimum": 1 },
+        "window_start": { "type": "string", "format": "date" },
+        "window_end": { "type": "string", "format": "date" }
+      }
+    },
+    "commentary": {
+      "type": "object",
+      "required": ["text", "model", "prompt_version", "generated_at"],
+      "additionalProperties": false,
+      "properties": {
+        "text": { "type": "string" },
+        "model": { "type": "string" },
+        "prompt_version": { "type": "string" },
+        "generated_at": { "type": "string" }
+      }
+    },
+    "growth10kBlock": {
+      "type": "object",
+      "required": ["fund", "yardstick"],
+      "additionalProperties": false,
+      "properties": {
+        "fund": {
+          "type": "array",
+          "items": { "$ref": "#/$defs/seriesPoint" }
+        },
+        "yardstick": {
+          "type": "array",
+          "items": { "$ref": "#/$defs/seriesPoint" }
+        }
+      }
+    },
+    "seriesBlock": {
+      "description": "Chart-only, month-end-grain series (spec-flexicap-page §4) — visual-grade float, never a figure of record. Sibling of `rolling` (the cross-sectionally rank-backed analytics panels), not a replacement for it.",
+      "type": "object",
+      "required": ["growth_10k", "underwater"],
+      "additionalProperties": false,
+      "properties": {
+        "growth_10k": {
+          "anyOf": [{ "$ref": "#/$defs/growth10kBlock" }, { "type": "null" }],
+          "description": "Month-end growth of ₹10,000, fund vs category yardstick, over their common history. Null when the fund and yardstick share no common month-end date."
+        },
+        "underwater": {
+          "type": "array",
+          "items": { "$ref": "#/$defs/seriesPoint" },
+          "description": "Month-end drawdown-from-peak for the fund. The headline max-drawdown figure remains the daily-basis `metrics.max_drawdown_SI`."
+        }
+      }
+    },
+    "windowBlock": {
+      "description": "Effective-n disclosure for one trailing window (B2) — counts computed over the same aligned panels the metrics themselves receive, never re-derived from NAV — plus the attributable-null reasons for this window (B3).",
+      "type": "object",
+      "required": ["n_months", "n_overlap_rf", "n_overlap_benchmark", "refused"],
+      "additionalProperties": false,
+      "properties": {
+        "n_months": { "type": "integer", "minimum": 0 },
+        "n_overlap_rf": { "type": "integer", "minimum": 0 },
+        "n_overlap_benchmark": { "type": "integer", "minimum": 0 },
+        "refused": {
+          "type": "object",
+          "additionalProperties": { "type": "string" },
+          "description": "metric_name -> reason (e.g. 'insufficient_history(required=36, available=14)') for every metric this window nulled via InsufficientHistoryError."
+        }
+      }
+    },
+    "fundEntry": {
+      "type": "object",
+      "required": [
+        "amfi_code",
+        "scheme_name",
+        "fund_house",
+        "benchmark",
+        "metrics",
+        "calendar_years",
+        "alpha",
+        "rolling",
+        "ranks",
+        "windows",
+        "commentary"
+      ],
+      "additionalProperties": false,
+      "properties": {
+        "amfi_code": { "type": "string" },
+        "scheme_name": { "type": "string" },
+        "fund_house": { "type": "string" },
+        "benchmark": { "$ref": "#/$defs/benchmarkBlock" },
+        "metrics": {
+          "type": "object",
+          "additionalProperties": { "$ref": "#/$defs/nullableNumber" }
+        },
+        "calendar_years": {
+          "type": "object",
+          "additionalProperties": { "$ref": "#/$defs/nullableNumber" }
+        },
+        "alpha": {
+          "type": "object",
+          "additionalProperties": {
+            "anyOf": [{ "$ref": "#/$defs/alphaResult" }, { "type": "null" }]
+          }
+        },
+        "rolling": {
+          "type": "object",
+          "additionalProperties": {
+            "type": "array",
+            "items": { "$ref": "#/$defs/seriesPoint" }
+          }
+        },
+        "series": { "$ref": "#/$defs/seriesBlock" },
+        "ranks": {
+          "type": "object",
+          "additionalProperties": { "$ref": "#/$defs/rankEntry" }
+        },
+        "windows": {
+          "type": "object",
+          "additionalProperties": { "$ref": "#/$defs/windowBlock" }
+        },
+        "commentary": {
+          "anyOf": [{ "$ref": "#/$defs/commentary" }, { "type": "null" }]
+        }
+      }
+    }
+  }
+}
