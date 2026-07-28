@@ -39,7 +39,7 @@
       <th data-sortable="true">Excess 5Y</th>
       <th data-sortable="true">Volatility (3Y)</th>
       <th data-sortable="true">Sharpe (3Y)</th>
-      <th data-sortable="true">Rank (3Y %ile)</th>
+      <th data-sortable="true">Rank (3Y %ile)<sup class="fn-ref">†</sup></th>
     </tr>
   </thead>
   <tbody>
@@ -63,4 +63,5 @@
     {% endfor %}
   </tbody>
 </table>
+<p class="fn-note" id="pct-note"><sup class="fn-ref">†</sup> {{ percentile_footnote }}</p>
 {% endblock %}

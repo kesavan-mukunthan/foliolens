@@ -20,7 +20,13 @@ from jinja2 import Environment, FileSystemLoader, select_autoescape
 
 from . import charts, presentation
 from .pdf import render_pdfs
-from .strings import DISCLAIMER, SURVIVORSHIP_FOOTNOTE, TIER_FALLBACK_LABEL
+from .strings import (
+    DISCLAIMER,
+    PERCENTILE_FOOTNOTE,
+    SURVIVORSHIP_FOOTNOTE,
+    T_STAT_SUPPRESSION_FOOTNOTE,
+    TIER_FALLBACK_LABEL,
+)
 
 _HERE = Path(__file__).parent
 _TEMPLATES_DIR = _HERE / "templates"
@@ -102,6 +108,7 @@ def render_site(metrics_path: Path, out_dir: Path) -> RenderSummary:
         ),
         aggregate_rows=presentation.build_aggregate_rows(data["universe"]["aggregates"]),
         index_rows=presentation.build_index_rows(funds),
+        percentile_footnote=PERCENTILE_FOOTNOTE,
     )
     (out_dir / "index.html").write_text(index_html, encoding="utf-8")
 
@@ -115,6 +122,7 @@ def render_site(metrics_path: Path, out_dir: Path) -> RenderSummary:
         fund_charts = charts.build_charts(fund)
         if not any(fund_charts.values()):
             all_skipped.append(fund["amfi_code"])
+        alpha_row = presentation.build_alpha_row(fund["alpha"], fund.get("windows", {}))
         html = fund_tmpl.render(
             **common_ctx,
             root_prefix="../",
@@ -126,7 +134,9 @@ def render_site(metrics_path: Path, out_dir: Path) -> RenderSummary:
             windows=presentation.WINDOWS,
             calendar_years=calendar_years,
             metrics_rows=presentation.build_metrics_rows(fund["metrics"]),
-            alpha_row=presentation.build_alpha_row(fund["alpha"]),
+            alpha_row=alpha_row,
+            alpha_suppressed=any(c.suppressed for c in alpha_row.values() if c is not None),
+            t_stat_suppression_footnote=T_STAT_SUPPRESSION_FOOTNOTE,
             charts=fund_charts,
             tier_fallback_label=TIER_FALLBACK_LABEL,
         )

@@ -28,6 +28,12 @@
   th[data-dir="asc"]::after { content: "▲"; }
   th[data-dir="desc"]::after { content: "▼"; }
   td.greyed { color: #999; }
+  /* Footnote references (D2b percentile convention, D2c t-stat suppression):
+     a small superscript marker in a header/cell, and the matching note below
+     the table. Muted so it reads as apparatus, not data. */
+  sup.fn-ref { color: #1a5fb4; font-size: 0.7em; }
+  p.fn-note { font-size: 0.78rem; color: #555; margin: -0.8rem 0 1.5rem; }
+  p.fn-note sup.fn-ref { color: #555; }
   /* Excess-return colouring only (amendment 4) — plain classes, not inline
      style, so a later print stylesheet (F3) can leave colour alone instead
      of having to strip an inline attribute; do not scope these to a
