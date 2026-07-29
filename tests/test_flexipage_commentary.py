@@ -26,12 +26,13 @@ from foliolens.report.flexipage.commentary import (
     CommentaryResult,
     CommentarySummary,
     CommentaryTransport,
-    COMMENTARY_V4_SYSTEM_PROMPT,
+    COMMENTARY_V5_SYSTEM_PROMPT,
     commentary_payload,
     generate_fund_commentary,
     run,
     validate_commentary,
 )
+from foliolens.report.flexipage.render.presentation import T_STAT_MIN_MONTHS
 
 SPEC_PATH = Path(__file__).parent.parent / "specs" / "spec-flexicap-page.md"
 
@@ -47,18 +48,24 @@ def _normalise(text: str) -> str:
 
 def _spec_commentary_prompt() -> str:
     text = SPEC_PATH.read_text(encoding="utf-8")
-    match = re.search(r"### commentary-v4.*?```\n(.*?)```", text, re.S)
-    assert match is not None, "could not locate the commentary-v4 fenced block in the spec"
+    match = re.search(r"### commentary-v5.*?```\n(.*?)```", text, re.S)
+    assert match is not None, "could not locate the commentary-v5 fenced block in the spec"
     return match.group(1)
 
 
 def test_prompt_constant_matches_spec_verbatim() -> None:
-    assert _normalise(COMMENTARY_V4_SYSTEM_PROMPT) == _normalise(_spec_commentary_prompt())
+    assert _normalise(COMMENTARY_V5_SYSTEM_PROMPT) == _normalise(_spec_commentary_prompt())
 
 
 def test_banned_vocabulary_includes_v3_additions() -> None:
     assert "yardstick" in BANNED_VOCABULARY
     assert "year-to-date" in BANNED_VOCABULARY
+
+
+def test_banned_vocabulary_includes_v5_additions() -> None:
+    assert "skill" in BANNED_VOCABULARY
+    assert "added value" in BANNED_VOCABULARY
+    assert "manager ability" in BANNED_VOCABULARY
 
 
 # ---------------------------------------------------------------------------
@@ -378,13 +385,246 @@ def test_validate_commentary_multiple_violations_all_reported() -> None:
 
 
 # ---------------------------------------------------------------------------
+# v5 market-model decomposition -- payload shape + validator gates (a)-(d)
+# ---------------------------------------------------------------------------
+
+
+def _market_fund(amfi_code: str = "MKT001") -> dict[str, Any]:
+    """A fund carrying the beta / benchmark-return / alpha inputs the v5
+    market-model decomposition needs, plus a ``windows`` block whose
+    ``n_months`` deliberately straddles ``T_STAT_MIN_MONTHS``: the 1Y window
+    is a thin sample (t-stat suppressed) while the 3Y/5Y windows clear it.
+    """
+    fund = _fund(amfi_code)
+    fund["metrics"] = {
+        **fund["metrics"],
+        "beta_1Y": 0.90,
+        "benchmark_return_1Y": 0.08,
+        "beta_3Y": 1.10,
+        "benchmark_return_3Y": 0.10,
+        "beta_5Y": 1.05,
+        "benchmark_return_5Y": 0.09,
+    }
+    fund["alpha"] = {
+        "alpha_1Y": {"value": 0.019, "t_stat": 1.10, "n": 12},
+        "alpha_3Y": {"value": 0.024, "t_stat": 1.50, "n": 36},
+        "alpha_5Y": {"value": 0.031, "t_stat": 2.80, "n": 60},
+    }
+    fund["windows"] = {
+        "1Y": {"n_months": 12},
+        "3Y": {"n_months": 36},
+        "5Y": {"n_months": 60},
+    }
+    return fund
+
+
+def _market_json(fund: dict[str, Any] | None = None) -> str:
+    return json.dumps(
+        commentary_payload(fund or _market_fund(), _universe()), sort_keys=True
+    )
+
+
+def test_fixture_straddles_the_suppression_threshold() -> None:
+    """The whole (b)/(c) split relies on 1Y being thin and 3Y/5Y being deep."""
+    assert 12 < T_STAT_MIN_MONTHS <= 36
+
+
+# --- payload: beta_contribution (point 1) ---
+
+
+def test_commentary_payload_adds_beta_contribution_per_window() -> None:
+    metrics = commentary_payload(_market_fund(), _universe())["metrics"]
+    assert metrics["beta_contribution_1Y"] == round(0.90 * 0.08, 6)
+    assert metrics["beta_contribution_3Y"] == round(1.10 * 0.10, 6)
+    assert metrics["beta_contribution_5Y"] == round(1.05 * 0.09, 6)
+    # The residual (alpha) is never folded into metrics -- it has its own block.
+    assert "alpha_3Y" not in metrics
+
+
+def test_commentary_payload_skips_beta_contribution_when_inputs_absent() -> None:
+    # The baseline fixture carries no beta_/benchmark_return_ keys at all.
+    metrics = commentary_payload(_fund(), _universe())["metrics"]
+    assert not any(k.startswith("beta_contribution_") for k in metrics)
+
+
+def test_commentary_payload_beta_contribution_reconciles_to_product() -> None:
+    payload = commentary_payload(_market_fund(), _universe())
+    m = payload["metrics"]
+    for w in ("1Y", "3Y", "5Y"):
+        assert m[f"beta_contribution_{w}"] == round(m[f"beta_{w}"] * m[f"benchmark_return_{w}"], 6)
+
+
+# --- payload: alpha block with significance-gated t-stat ---
+
+
+def test_commentary_payload_alpha_block_keeps_tstat_for_deep_windows() -> None:
+    alpha = commentary_payload(_market_fund(), _universe())["alpha"]
+    assert alpha["alpha_3Y"] == {"value": 0.024, "t_stat": 1.50}
+    assert alpha["alpha_5Y"] == {"value": 0.031, "t_stat": 2.80}
+
+
+def test_commentary_payload_alpha_block_suppresses_tstat_for_thin_window() -> None:
+    # 1Y has only 12 months: the value survives (so the validator can guard it
+    # against being quoted, rule (c)) but the t-stat is dropped.
+    alpha = commentary_payload(_market_fund(), _universe())["alpha"]
+    assert alpha["alpha_1Y"] == {"value": 0.019}
+    assert "t_stat" not in alpha["alpha_1Y"]
+
+
+def test_commentary_payload_alpha_block_omits_absent_window() -> None:
+    fund = _market_fund()
+    del fund["alpha"]["alpha_5Y"]
+    alpha = commentary_payload(fund, _universe())["alpha"]
+    assert "alpha_5Y" not in alpha
+    assert set(alpha) == {"alpha_1Y", "alpha_3Y"}
+
+
+def test_commentary_payload_empty_alpha_gives_empty_block() -> None:
+    assert commentary_payload(_fund(), _universe())["alpha"] == {}
+
+
+def test_commentary_payload_market_model_stays_within_size_bound() -> None:
+    payload = commentary_payload(_market_fund(), _universe())
+    assert _max_list_length(payload) <= 4
+    assert len(json.dumps(payload, sort_keys=True)) < 16_000
+
+
+# --- validator gate (a): beta_contribution reconciliation ---
+
+
+def test_validate_flags_beta_contribution_that_mismatches_payload() -> None:
+    payload = commentary_payload(_market_fund(), _universe())
+    payload["metrics"]["beta_contribution_3Y"] = 0.99  # != beta_3Y x benchmark_return_3Y
+    input_json = json.dumps(payload, sort_keys=True)
+    text = (
+        "Against the category benchmark the three-year benchmark return was "
+        "10%, of which the beta contribution was 99% over the window measured "
+        "to date for this cohort of funds under review this cycle overall.\n\n"
+        "Second paragraph padding that introduces no further figures at all "
+        "into this deliberately short illustrative validator sample today."
+    )
+    violations = validate_commentary(text, input_json)
+    assert any("beta_contribution_3Y" in v and "reconcile" in v for v in violations)
+    # A corrupted-but-quoted contribution still passes no-new-numbers (it IS a
+    # payload leaf) -- (a) is the gate that catches it.
+    assert not any("numbers not in input JSON" in v and "99" in v for v in violations)
+
+
+def test_validate_correct_beta_contribution_is_clean_of_that_rule() -> None:
+    text = (
+        "Against the category benchmark the three-year benchmark return was "
+        "10%, of which the beta contribution accounted for 11% of the fund's "
+        "own showing over the same window under review this cycle overall.\n\n"
+        "Second paragraph padding that introduces no further figures at all "
+        "into this deliberately short illustrative validator sample today."
+    )
+    violations = validate_commentary(text, _market_json())
+    assert not any("beta_contribution" in v for v in violations)
+
+
+# --- validator gate (b): sub-2-t alpha needs a hedge in the same paragraph ---
+
+
+def test_validate_flags_subthreshold_alpha_quoted_without_hedge() -> None:
+    # alpha_3Y carries t_stat 1.5 (< 2) and a deep enough sample to be shown.
+    text = (
+        "Against the category benchmark the residual alpha over three years "
+        "was 2.4%, a positive gap on the fund's own showing over the window "
+        "under review this cycle for this cohort of surviving funds overall.\n\n"
+        "Second paragraph padding that introduces no further figures at all "
+        "into this deliberately short illustrative validator sample today."
+    )
+    violations = validate_commentary(text, _market_json())
+    assert any("alpha_3Y" in v and "significance hedge" in v for v in violations)
+
+
+def test_validate_subthreshold_alpha_with_hedge_is_clean_of_that_rule() -> None:
+    text = (
+        "Against the category benchmark the residual alpha over three years "
+        "was 2.4%, though on the supplied t-statistic it is not statistically "
+        "distinguishable from zero and is read with that caveat in mind.\n\n"
+        "Second paragraph padding that introduces no further figures at all "
+        "into this deliberately short illustrative validator sample today."
+    )
+    violations = validate_commentary(text, _market_json())
+    assert not any("significance hedge" in v for v in violations)
+
+
+# --- validator gate (c): a suppressed-t-stat window's alpha must not appear ---
+
+
+def test_validate_flags_quoting_a_suppressed_alpha() -> None:
+    # alpha_1Y is suppressed (thin sample); its value 0.019 -> 1.9% must not be
+    # quoted even though it remains a payload figure.
+    text = (
+        "Against the category benchmark the one-year residual alpha was 1.9%, "
+        "a small positive gap on the fund's own showing over the period under "
+        "review this cycle for this cohort of surviving funds overall now.\n\n"
+        "Second paragraph padding that introduces no further figures at all "
+        "into this deliberately short illustrative validator sample today."
+    )
+    violations = validate_commentary(text, _market_json())
+    assert any("alpha_1Y" in v and "suppressed" in v for v in violations)
+
+
+def test_validate_significant_alpha_quoted_is_clean_of_suppression_rule() -> None:
+    # alpha_5Y (t_stat 2.8, deep sample) is fully quotable.
+    text = (
+        "Against the category benchmark the five-year residual alpha was 3.1% "
+        "and is statistically significant on the supplied t-statistic across "
+        "the window under review this cycle for this cohort of funds overall.\n\n"
+        "Second paragraph padding that introduces no further figures at all "
+        "into this deliberately short illustrative validator sample today."
+    )
+    violations = validate_commentary(text, _market_json())
+    assert not any("suppressed" in v for v in violations)
+    assert not any("significance hedge" in v for v in violations)
+
+
+# --- validator gate (d): the new banned vocabulary ---
+
+
+def test_validate_flags_new_banned_vocabulary() -> None:
+    text = (
+        "The residual reflects genuine skill and added value from real "
+        "manager ability across the window under review this cycle now.\n\n"
+        "Second paragraph padding that introduces no further figures today."
+    )
+    joined = "; ".join(validate_commentary(text, _market_json()))
+    assert "banned vocabulary" in joined
+    assert "skill" in joined
+    assert "added value" in joined
+    assert "manager ability" in joined
+
+
+# --- integration: a fully-formed v5 commentary validates clean ---
+
+
+def test_validate_full_v5_market_model_commentary_is_clean() -> None:
+    text = (
+        "Measured against the category benchmark, the three-year benchmark "
+        "return was 10%, of which the beta contribution — the part explained "
+        "by the fund's benchmark exposure — was 11%. The residual alpha over "
+        "the same window was 2.4%, though on the supplied t-statistic it is "
+        "not statistically distinguishable from zero and is read with that "
+        "caveat in mind throughout this account of the fund's recent record.\n\n"
+        "On risk, three-year volatility stood at 18% and the maximum drawdown "
+        "since inception reached 22%. The fund's current percentile rank on "
+        "the three-year window is 12.5, placing it toward the upper part of "
+        "its peer cohort within the surviving flexi-cap universe under review "
+        "this cycle, on the ranking figures supplied in the underlying data."
+    )
+    assert validate_commentary(text, _market_json()) == []
+
+
+# ---------------------------------------------------------------------------
 # generate_fund_commentary: the one-retry, validate-before-persist path
 # ---------------------------------------------------------------------------
 
 
 def test_generate_fund_commentary_success_when_clean() -> None:
     def stub(system: str, messages: list[dict[str, str]]) -> str:
-        assert system == COMMENTARY_V4_SYSTEM_PROMPT
+        assert system == COMMENTARY_V5_SYSTEM_PROMPT
         assert len(messages) == 1
         assert messages[0]["role"] == "user"
         assert "Alpha Flexi Cap Fund" in messages[0]["content"]
@@ -394,7 +634,7 @@ def test_generate_fund_commentary_success_when_clean() -> None:
     assert isinstance(result, CommentaryResult)
     assert result.text == _CLEAN_TEXT
     assert result.model == MODEL == "claude-sonnet-4-6"
-    assert result.prompt_version == PROMPT_VERSION == "commentary-v4"
+    assert result.prompt_version == PROMPT_VERSION == "commentary-v5"
     datetime.fromisoformat(result.generated_at)  # does not raise
 
 
@@ -494,7 +734,7 @@ def test_run_persists_commentary_fields_in_place(tmp_path: Path) -> None:
         commentary = fund["commentary"]
         assert commentary["text"] == _CLEAN_TEXT
         assert commentary["model"] == MODEL
-        assert commentary["prompt_version"] == "commentary-v4"
+        assert commentary["prompt_version"] == "commentary-v5"
         datetime.fromisoformat(commentary["generated_at"])
 
 
