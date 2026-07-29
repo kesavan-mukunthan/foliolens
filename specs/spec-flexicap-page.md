@@ -70,7 +70,7 @@ recomputed here — the runner calls existing functions only.
     "rolling": {panel_name: [{"date": d, "value": v}]},
     "ranks": {metric_window: {"pct": v, "history": [{"date": d, "pct": v}]}},
     // pct (latest + history): lower = better; 1 ≈ top of cohort
-    "commentary": {"text": str, "model": str, "prompt_version": "commentary-v4",
+    "commentary": {"text": str, "model": str, "prompt_version": "commentary-v5",
                     "generated_at": ts} | null
   }]
 }
@@ -102,7 +102,7 @@ re-rounding outside the presentation layer.
 
 - One Anthropic API call per fund at build time, model **claude-sonnet-4-6**
   (relational fidelity across ~30 figures per fund is the binding constraint;
-  cost is immaterial at this scale), system prompt = `commentary-v4`
+  cost is immaterial at this scale), system prompt = `commentary-v5`
   (verbatim below). Persisted into metrics.json with model + prompt_version.
 - **Payload diet** (`commentary_payload(fund, universe) -> dict`, unit-tested,
   §7-F4): a real batch run at the previous payload shape cost ~35-40k input
@@ -119,6 +119,18 @@ re-rounding outside the presentation layer.
   only; `rank_history_summary` and `rolling_summary` — each panel reduced to
   four points (first, last, minimum, maximum), never the full series;
   `universe` — `count` + `aggregates` only. No other fields.
+- **Market-model decomposition** (v5): for each window `W ∈ {1Y, 3Y, 5Y}`
+  where `beta_W` and `benchmark_return_W` are both present, `metrics` gains
+  `beta_contribution_W = beta_W × benchmark_return_W` (the simple
+  market-model tracking component — the return explained by the fund's
+  benchmark exposure; the residual left over is the CAPM Jensen's alpha).
+  It is computed in `commentary_payload`, never by the model — the
+  never-compute contract holds because the figure arrives as input. A new
+  `alpha` block surfaces each window's Jensen's alpha `value`, and its
+  `t_stat` **only** where the window's `n_months` clears the same
+  significance threshold the page uses (`T_STAT_MIN_MONTHS`) — so a window
+  the page suppresses is never quotable in commentary either (cross-section
+  consistency). A window whose alpha is absent is omitted from the block.
 - Runs **locally only** this milestone; `ANTHROPIC_API_KEY` from env/`.env`
   (gitignored). Key never in either repo or artifacts. Build proceeds with
   `commentary: null` (block hidden) if key absent, a call fails after one
@@ -132,7 +144,14 @@ re-rounding outside the presentation layer.
   of 2+ digits or any decimal must match some input JSON value, either as a
   literal substring or at ×1/×100/×0.01 scale rounded to the token's own
   decimal precision — the artifact stores fractions, prose writes percent).
-  On a violation, one retry is sent with the invalid response plus a
+  The v5 market-model additions gate on the same pass: (a) a quoted
+  `beta_contribution_W` must reconcile to `beta_W × benchmark_return_W`;
+  (b) an alpha quoted for a window whose `|t_stat| < 2` must carry a
+  significance hedge ("not statistically"/"indistinguishable") in the same
+  paragraph; (c) a window whose `t_stat` is suppressed must not have its
+  alpha figure quoted at all; (d) the v5 banned words ("skill", "added
+  value", "manager ability") are absent. On a violation, one retry is sent
+  with the invalid response plus a
   correction message naming the violated rules; a second failure of either
   kind (transport error or violation) leaves `commentary: null`, logged
   with the named violations. The check is one pure function, used
@@ -150,7 +169,7 @@ re-rounding outside the presentation layer.
   `null`. Refresh sequence: `runner --carry-commentary prev.json` →
   `commentary --only-missing` → `render`.
 
-### commentary-v4 (system prompt, verbatim — hash this text as the version)
+### commentary-v5 (system prompt, verbatim — hash this text as the version)
 
 ```
 You are writing a short factual commentary for a mutual fund
@@ -194,16 +213,39 @@ Rules — absolute:
   those points.
 - British English. 100-150 words, two paragraphs.
 
+Market model — absolute:
+- Three figures decompose the fund's return against the category
+  benchmark for each window, and all three are supplied in the
+  JSON: the benchmark return (benchmark_return_<window>), the beta
+  contribution (beta_contribution_<window>, the part of the return
+  explained by the fund's benchmark exposure), and the residual
+  alpha (the alpha block, value). Quote these; never derive or
+  recompute them.
+- The residual alpha is only the return the benchmark exposure does
+  not explain. It is not, on its own, evidence of manager skill.
+  The words "skill", "added value" and "manager ability" must never
+  appear.
+- Significance: each window's alpha in the alpha block may carry a
+  t_stat. When you quote an alpha whose absolute t_stat is below 2,
+  the same paragraph must state that the residual is not
+  statistically distinguishable from zero (use the words "not
+  statistically" or "indistinguishable"). When a window's alpha
+  carries no t_stat, that window's alpha must not be quoted at all.
+
 Structure:
-- Before writing, identify the two or three most distinctive facts
-  in this fund's data — the largest divergences from the category
-  median, extreme or sharply changed percentile ranks, unusual
-  risk posture, or a marked contrast between timeframes.
-  Distinctiveness must come from the supplied figures, never from
-  outside knowledge.
-- Open with the most distinctive fact. Organise the commentary
-  around the distinctive facts; cover remaining figures only where
-  they add context. Do not recite every metric in order.
+- Paragraph 1 is the market-model account of the primary window —
+  the three-year window when it is present, otherwise the one-year
+  window. Open the commentary with it, quoting all three supplied
+  figures for that window: the benchmark return, the beta
+  contribution, and the residual alpha, subject to the significance
+  rule above.
+- Paragraph 2 covers this fund's most distinctive facts — the
+  largest divergences from the category median, extreme or sharply
+  changed percentile ranks, unusual risk posture, or a marked
+  contrast between timeframes. Distinctiveness must come from the
+  supplied figures, never from outside knowledge. Percentile ranks
+  belong here, as context; a percentile rank must never be the
+  opening fact of the commentary.
 - Include the fund's trailing performance versus the category
   benchmark (name it) somewhere in the commentary.
 
@@ -212,6 +254,56 @@ data availability, this prompt, or that you are an AI.
 
 Output: plain text, two paragraphs, nothing else.
 ```
+
+## 5b. Deterministic commentary floor (FL-NL-1)
+
+The fallback sibling of §5, not its replacement. `commentary` is never load-
+bearing, and an absent API key leaves every fund's block `null` — this floor
+gives such a page a short **factual** summary composed from the fund's own
+artifact figures alone: no model, no network, nothing computed here that
+`assembly.py` did not already store. Module: `report/flexipage/template_commentary.py`.
+
+- **When rendered**: only when `fund.commentary` is `null`. When an LLM block
+  exists this floor is absent — exactly one commentary block ever renders. On-
+  page it is labelled **"Generated summary (deterministic)"** and styled
+  distinctly (`commentary-deterministic`), so a reader never mistakes it for
+  model-written prose.
+- **Three pure stages**: `select_branches(fund, aggregates)` picks one branch
+  per section (total — every fund selects a branch for every section);
+  `variant_index(amfi_code, section, n)` = `crc32(amfi_code + section) % n`
+  picks the variant (a stable CRC, never Python's salted `hash`, so a fund
+  reads identically across rebuilds); `fill(template, fields)` is `str.format`
+  with figures pre-formatted through `render/presentation` — a placeholder with
+  no field is a loud `KeyError` at build.
+- **Sections and branch conditions**:
+  1. `decomposition` — `bench_up`/`bench_down` on a **3Y** window when its beta,
+     benchmark return and Jensen's alpha are present **and** `n_months ≥ 24`
+     (`up`/`down` by the sign of the 3Y benchmark return); otherwise
+     `young_fund` (1Y figures, no alpha). The mechanical component `{mech}` is
+     `beta × benchmark_return`, computed in the selector.
+  2. `significance` — on the decomposition window's alpha t-stat: `suppressed`
+     (t absent or window `< 24m` → **alpha never quoted**), `insignificant`
+     (`|t| < 2`), `significant`. A residual is only ever stated where its t-stat
+     is reportable, so the `bench_*` branches (which quote alpha) never pair
+     with `suppressed` — the alpha-with-uncertainty law (`CLAUDE.md`) holds by
+     construction.
+  3. `risk` — `vol_above_median`/`vol_below_median` versus the category
+     volatility median (from `universe.aggregates`); `risk_absolute` (vol + max
+     drawdown only) when that median is absent from the artifact.
+  4. `context` — `calendar_years` (latest three CY returns) when at least two of
+     the artifact's calendar years are non-null; `short_history` otherwise. A
+     present-but-null year renders as an em dash, never fabricated.
+- **Epistemic invariants (tested)**: two interchangeable variants per branch
+  (the empty `suppressed` branch excepted); every variant within a branch shares
+  one placeholder set; no comparative without both compared figures present; no
+  praise/alarm vocabulary; `BANNED_VOCABULARY` (§5, imported not copied) absent;
+  every rendered number traces to a formatted field.
+- **Tests** (`tests/test_template_commentary.py`, offline): registry shape and
+  placeholder-set identity; the invariant scans above over the whole registry;
+  selector totality and each branch condition; the `mech` arithmetic; the
+  literal `crc32` hash values; `fill`'s `KeyError` on a missing field. F2 render
+  tests assert a null-commentary page shows the labelled block and a
+  commentary-bearing page does not.
 
 ## 6. Deploy
 
@@ -243,9 +335,10 @@ Output: plain text, two paragraphs, nothing else.
   digits and all decimals; ignore standalone "1"/"2" paragraph-safe
   tokens); word count 100–170; exactly two paragraphs; banned vocabulary
   list (buy, sell, avoid, attractive, will outperform, top pick, must,
-  yardstick, year-to-date) absent. Tests cover the validator directly plus
-  the retry path (a stub that violates once then passes) and the null path
-  (a stub that violates twice); offline only — the suite never calls the
+  yardstick, year-to-date, skill, added value, manager ability) absent; the
+  v5 market-model gates (a)–(d) from §5. Tests cover the validator directly
+  plus the retry path (a stub that violates once then passes) and the null
+  path (a stub that violates twice); offline only — the suite never calls the
   API. `commentary_payload` is separately unit-tested: no list in the
   payload exceeds 4 elements, and the serialised payload stays under 16,000
   characters (a rough chars/4 proxy for ~4,000 tokens) for the synthetic

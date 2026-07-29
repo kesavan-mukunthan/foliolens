@@ -18,6 +18,7 @@ from typing import Any
 
 from jinja2 import Environment, FileSystemLoader, select_autoescape
 
+from .. import template_commentary
 from . import charts, presentation
 from .pdf import render_pdfs
 from .strings import (
@@ -35,19 +36,17 @@ _TEMPLATES_DIR = _HERE / "templates"
 _STATIC_DIR = _HERE / "static"
 
 
-def _pct(value: float | None, digits: int = 2) -> str:
-    """A decimal fraction as a percentage string, or an em dash when null."""
-    return "—" if value is None else f"{value * 100:.{digits}f}%"
+#: The percentage/ratio formatters live in :mod:`.presentation` (this page's
+#: formatting-helper home) so the F2 table cells and the deterministic
+#: commentary floor render an identical figure; the Jinja filters below are
+#: thin aliases, never a second implementation.
+_pct = presentation.format_pct
+_num = presentation.format_ratio
 
 
 def _pct100(value: float | None, digits: int = 1) -> str:
     """A value already on a 0-100 scale (e.g. a percentile rank) as a string."""
     return "—" if value is None else f"{value:.{digits}f}%"
-
-
-def _num(value: float | None, digits: int = 2) -> str:
-    """A plain (non-percentage) figure, or an em dash when null."""
-    return "—" if value is None else f"{value:.{digits}f}"
 
 
 def _dataval(value: float | str | None) -> str | float:
@@ -136,12 +135,18 @@ def render_site(metrics_path: Path, out_dir: Path) -> RenderSummary:
     fund_tmpl = env.get_template("fund.html")
     calendar_years = sorted(funds[0]["calendar_years"].keys()) if funds else []
 
+    aggregates = data.get("universe", {}).get("aggregates", {})
     all_skipped: list[str] = []
     for fund in funds:
         fund_charts = charts.build_charts(fund)
         if not any(fund_charts.values()):
             all_skipped.append(fund["amfi_code"])
         alpha_row = presentation.build_alpha_row(fund["alpha"], fund.get("windows", {}))
+        # Deterministic commentary floor (FL-NL-1): only when the LLM block is
+        # null; when commentary exists this stays None and the block is absent.
+        deterministic_commentary = (
+            None if fund.get("commentary") else template_commentary.render_block(fund, aggregates)
+        )
         html = fund_tmpl.render(
             **common_ctx,
             root_prefix="../",
@@ -157,6 +162,7 @@ def render_site(metrics_path: Path, out_dir: Path) -> RenderSummary:
             t_stat_suppression_footnote=T_STAT_SUPPRESSION_FOOTNOTE,
             charts=fund_charts,
             tier_fallback_label=TIER_FALLBACK_LABEL,
+            deterministic_commentary=deterministic_commentary,
         )
         (funds_dir / f"{fund['amfi_code']}.html").write_text(html, encoding="utf-8")
 

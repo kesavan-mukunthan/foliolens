@@ -16,6 +16,26 @@ from .strings import RF_EXTENSION_ESCALATED_TEMPLATE, RF_EXTENSION_FOOTER_TEMPLA
 #: Trailing windows shown across every per-fund metrics table.
 WINDOWS: tuple[str, ...] = ("1Y", "3Y", "5Y")
 
+
+def format_pct(value: float | None, digits: int = 2) -> str:
+    """A decimal fraction rendered at percentage scale, or an em dash when null.
+
+    The single percentage formatter for this page — the F2 Jinja ``pct`` filter
+    (:mod:`.build`) and the deterministic-commentary floor
+    (:mod:`..template_commentary`) both route through here, so a figure reads
+    identically whether it lands in a table cell or a generated sentence.
+    """
+    return "—" if value is None else f"{value * 100:.{digits}f}%"
+
+
+def format_ratio(value: float | None, digits: int = 2) -> str:
+    """A dimensionless ratio (Sharpe, beta, a t-stat) as a plain number, or an
+    em dash when null — never multiplied to percentage scale (see
+    :func:`is_ratio_metric`). The companion to :func:`format_pct`, shared by the
+    same two callers so ratio figures never diverge between surfaces.
+    """
+    return "—" if value is None else f"{value:.{digits}f}"
+
 #: (metric key prefix, display label, is-a-return-like-percentage, is-excess-
 #: return) for each row of the per-fund metrics table (``spec-flexicap-page
 #: §2``). Excess return sits immediately after its own return row (amendment
