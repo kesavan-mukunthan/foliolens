@@ -1,0 +1,76 @@
+# Working board
+
+Authoritative working state between sessions. Updated by rider commits as
+items land. Newer than project memory; older than an open PR — when this
+file and an open PR disagree, the PR wins.
+
+_Last updated: 2026-07-31 (PR 48 merged)._
+
+## In flight
+
+- **F-TER stage 0** — cloud session fetching real AMFI TER/AAUM disclosure
+  files (one pre-Apr-2026 TER month, one post — SEBI MF Regulations 2026
+  regime break — one AAUM drop); reports formats/columns/IP behaviour then
+  STOPS. Stage 1 (parsers, regime-tagged schema, name resolution) proceeds
+  only after review confirmation of that report. Stage 2 (backfill) runs
+  local, new parquets only.
+- **E local batch** (one local sitting, manifest issued in-chat 2026-07-31):
+  back up metrics.json → 39-call commentary-v5 batch (ANTHROPIC_API_KEY;
+  model pinned in code) → sanity gate (>8 nulls = stop) → render → push
+  site → spot-checks (118424, 119718, one null-commentary fund's
+  deterministic block, banned-vocab negative check). Same sitting:
+  **scheme-master rebuild** from existing raw shards (no refetch) with the
+  new inception column; report coverage + inception ≤ first-NAV violations
+  (informational).
+- **E review** (after publish): validation rejection texts verbatim + ~5
+  sampled commentaries.
+
+## Queue (fire order; one slot per landed item)
+
+1. **FL-DQ-2** — hole-month audit artifact (228/7,913 funds with internal
+   zero-NAV months; classify upstream-vs-fetch via raw shards). Gates
+   multi-category, esp. debt. Sonnet-cloud OK.
+2. **FL-IO-1** — decimal128 assertion at read (`data_access.py`). Gates the
+   GCS move. Sonnet-cloud OK.
+3. **FL-ING-1** — incremental ingest keyed (code, date) + failed_codes
+   split transient/permanent. Gates scheduled jobs. Opus.
+4. **F-TER stages 1–2** — after stage-0 confirmation. Opus; backfill local.
+5. **FL-CAL-3** — sub-year returns point-to-point via the return engine. Opus.
+6. **FL-CAL-4** — calendar provenance in artifact + widened derivation base
+   for thin cohorts.
+7. **FL-ART-1** — `as_of` required in `build_metrics`; single-fund default
+   moves to the caller.
+8. **FL-TOOL-1** — `[tool.ruff]` config + resulting cleanup. **Last, alone**
+   (repo-wide diff; conflicts with everything open).
+
+## After F (agreed order)
+
+Docs pass (full spec reconciliation) → multi-category (large-cap first;
+benchmark curation is the real per-category work; FL-DQ-2 gates debt) +
+category landing page → GCS move (FL-IO-1 first; repoint the DataAccess
+seam; Drive stays cold copy) → scheduled jobs (Cloud Run Jobs + Scheduler;
+the publish job runs the full gate — identities + reconciliation — before
+any push; niftyindices stays local unless probed otherwise).
+
+## Standing rules (chat-derived, now written down)
+
+- Live repo before design (CLAUDE.md inventory rule); project-mounted docs
+  are stale scratch.
+- Manifests carry exact branch names but cloud runs suffix them
+  (`claude/…-xxxxxx`) — get the real name from the PR page; unauthenticated
+  API lookups rate-limit on shared egress IPs.
+- Red tests before fixes; no tolerance widens without adjudication; STOP
+  conditions are terminal, not pauses (F-TER stage 0 in particular).
+- Nothing rewrites the local parquet without a current backup; every merge
+  is a human click (review-required protection).
+- Model split: runsheet-flavoured tasks Sonnet, design-surface tasks Opus.
+
+## Loose ends (no deadline)
+
+- rf worktree removal: `git worktree remove ../foliolens-rf`.
+- Manager-tenure CSV — 39 rows, hand-curated, source-dated.
+- IIM-A H1-2026 rf refresh when published (carry-forward self-heals; cap 12
+  months, escalated disclosure past 6).
+- Fixture enrichment with 119718 at next re-freeze (FL-FIX-1).
+- Docs riders: inception-date contract paragraph rides F-TER stage 1;
+  FL-ledger open/closed convention rides the first FL PR to land.
