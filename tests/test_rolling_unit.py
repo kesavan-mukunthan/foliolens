@@ -12,10 +12,15 @@ invariants the spec's acceptance rule names directly:
 """
 from __future__ import annotations
 
+from datetime import date
+
 import numpy as np
 import pytest
 
 from foliolens.analytics.rolling import ROLLING_WINDOWS, rolling_return, rolling_returns
+from foliolens.model.value_objects import ReturnSeries
+from foliolens.returns.engine import _subtract_years
+from foliolens.returns.frequency import Frequency
 from fixtures import month_end_dates, returns_series
 
 _ABS = 1e-12
@@ -25,6 +30,22 @@ def _fund(n: int) -> object:
     # Deterministic, non-degenerate monthly returns: -0.01, 0.00, 0.01, 0.02, 0.03 repeating.
     values = [((i % 5) - 1) / 100.0 for i in range(n)]
     return returns_series(values)
+
+
+def _gapped_panel() -> ReturnSeries:
+    """24 consecutive month-ends (2023-01 .. 2024-12) with two mid-series months
+    removed — 2024-06-30 and 2024-07-31 — a genuine data hole *inside* the year
+    trailing 2024-12-31. 22 surviving entries; the 1Y window ending 2024-12-31
+    spans 12 calendar months but holds only 10 of them."""
+    dates = list(month_end_dates(24))  # 2023-01-31 .. 2024-12-31
+    values = [((i % 5) - 1) / 100.0 for i in range(24)]
+    drop = {17, 18}  # 2024-06-30, 2024-07-31
+    keep = [i for i in range(24) if i not in drop]
+    return ReturnSeries(
+        dates=tuple(dates[i] for i in keep),
+        values=np.array([values[i] for i in keep], dtype=np.float64),
+        frequency=Frequency.MONTHLY,
+    )
 
 
 # ---------------------------------------------------------------------------
@@ -128,3 +149,49 @@ def test_base_carries_through() -> None:
     rs = _fund(24)
     got = rolling_return(rs, 12)
     assert got.base == rs.base
+
+
+# ---------------------------------------------------------------------------
+# Gapped panel — the window is a calendar-date slice, not last-N observations
+# ---------------------------------------------------------------------------
+
+
+def test_rolling_window_after_gap_is_date_sliced_not_last_n() -> None:
+    # A rolling 1Y window anchored just after a mid-year data hole must cover the
+    # calendar year (<= 12 months, whatever survives), NOT reach back across the
+    # hole to collect a full 12 observations spanning 14 calendar months.
+    rs = _gapped_panel()
+    got = rolling_return(rs, 12)
+    anchor = date(2024, 8, 31)  # first month-end after the 2024-06/07 hole
+    assert anchor in got.dates
+    val = float(got.values[list(got.dates).index(anchor)])
+
+    lo = _subtract_years(anchor, 1)  # 2023-08-31
+    in_window = [
+        float(v) for d, v in zip(rs.dates, rs.values) if lo < d <= anchor
+    ]
+    # 2023-09 .. 2024-08 spans 12 calendar months but the hole leaves only 10.
+    assert len(in_window) == 10
+    date_sliced = float(np.prod([1.0 + v for v in in_window]) - 1.0)  # 12/12 → absolute
+    assert val == pytest.approx(date_sliced, abs=_ABS)
+
+    # The old last-N slice consumes 12 observations reaching back 14 calendar
+    # months (2023-07 .. 2024-08). The fix must diverge from that stretched value.
+    ei = list(rs.dates).index(anchor)
+    last_n = rs.values[ei - 11 : ei + 1]
+    assert len(last_n) == 12
+    stretched = float(np.prod(1.0 + last_n) - 1.0)
+    assert val != pytest.approx(stretched, abs=_ABS)
+
+
+def test_rolling_gapped_panel_contiguous_slice_unchanged() -> None:
+    # An anchor whose trailing year contains no hole is unaffected: date-slicing
+    # and last-N coincide (the fix is a no-op away from the gap).
+    rs = _gapped_panel()
+    got = rolling_return(rs, 12)
+    anchor = date(2023, 12, 31)  # trailing year 2023-01 .. 2023-12 is contiguous
+    val = float(got.values[list(got.dates).index(anchor)])
+    ei = list(rs.dates).index(anchor)
+    last_12 = rs.values[ei - 11 : ei + 1]
+    contiguous = float(np.prod(1.0 + last_12) - 1.0)
+    assert val == pytest.approx(contiguous, abs=_ABS)
