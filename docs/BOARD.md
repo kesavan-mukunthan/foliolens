@@ -14,14 +14,14 @@ _Last updated: 2026-07-31 (PR 48 merged)._
   STOPS. Stage 1 (parsers, regime-tagged schema, name resolution) proceeds
   only after review confirmation of that report. Stage 2 (backfill) runs
   local, new parquets only.
-- **E local batch** (one local sitting, manifest issued in-chat 2026-07-31):
+- **E local batch** (one local sitting, runsheet: `docs/runsheets/e-local-batch.md`):
   back up metrics.json → 39-call commentary-v5 batch (ANTHROPIC_API_KEY;
   model pinned in code) → sanity gate (>8 nulls = stop) → render → push
   site → spot-checks (118424, 119718, one null-commentary fund's
   deterministic block, banned-vocab negative check). Same sitting:
   **scheme-master rebuild** from existing raw shards (no refetch) with the
   new inception column; report coverage + inception ≤ first-NAV violations
-  (informational).
+  (informational); rebuild folded into the runsheet, step 6.
 - **E review** (after publish): validation rejection texts verbatim + ~5
   sampled commentaries.
 
