@@ -22,6 +22,7 @@ window.
 from __future__ import annotations
 
 import bisect
+from calendar import monthrange
 from datetime import date
 
 import numpy as np
@@ -41,6 +42,23 @@ ROLLING_WINDOWS: dict[str, int] = {"1Y": 12, "3Y": 36, "5Y": 60}
 def _year_month(d: date) -> tuple[int, int]:
     """(year, month) — the month-granular key a whole-year window is sliced on."""
     return (d.year, d.month)
+
+
+def _subtract_months(d: date, n: int) -> date:
+    """Subtract ``n`` calendar months, clamping the day down to the target
+    month's last day: ``2026-03-31 − 1 month → 2026-02-28``.
+
+    The month-granular counterpart of ``returns.engine._subtract_years`` and its
+    Feb-29 → Feb-28 clamp — one month-subtraction convention in one place, used
+    by ``analytics.artifact._trailing`` for both the sub-year period slices and
+    the whole-year windows. ``_subtract_months(d, 12·k)`` agrees with
+    ``_subtract_years(d, k)`` on its ``(year, month)`` — the granularity at which
+    these windows are sliced — so the two families never diverge at a boundary.
+    """
+    total = d.year * 12 + (d.month - 1) - n
+    year, month0 = divmod(total, 12)
+    month = month0 + 1
+    return date(year, month, min(d.day, monthrange(year, month)[1]))
 
 
 def rolling_return(rs: ReturnSeries, window_months: int) -> ReturnSeries:

@@ -30,10 +30,10 @@ stored inputs re-serialise identically (``spec-analytics §5`` acceptance).
 
 The metric arithmetic stays in the pure functions of ``metrics`` /
 ``distribution`` / ``rolling`` and the §3 daily adapters; this builder reads
-``investment.returns(Frequency.MONTHLY)`` **once**, date-slices it for the
-trailing windows (``_trailing``: the calendar span ``(as_of − W years,
-as_of]``, not the last ``12×W`` observations), and orchestrates — it invents no
-arithmetic.
+``investment.returns(Frequency.MONTHLY)`` **once**, date-slices it for every
+trailing window — the sub-year 1M/3M/6M period returns and the 1Y/3Y/5Y
+windows alike (``_trailing``: the calendar span ``(as_of − N months, as_of]``,
+not the last ``N`` observations) — and orchestrates — it invents no arithmetic.
 
 This is the **generic** metrics contract. Flexipage-specific fields (ranks,
 commentary, yardstick labels, category aggregates) are **not** built here —
@@ -51,7 +51,6 @@ from typing import Any
 
 from foliolens.model.investments import Investment
 from foliolens.model.value_objects import ReturnSeries
-from foliolens.returns.engine import _subtract_years
 from foliolens.returns.frequency import Frequency
 
 from .distribution import best_period, kurtosis, pct_positive, skew, worst_period
@@ -64,8 +63,8 @@ from .metrics import (
     sortino,
     volatility,
 )
-from .rolling import rolling_returns
-from .series_ops import InsufficientHistoryError, between, trailing_anchored
+from .rolling import _subtract_months, rolling_returns
+from .series_ops import InsufficientHistoryError, between
 
 #: Artifact schema version — bump on any breaking shape change to ``to_dict``.
 #: Bumped to ``analytics-2`` for the ``refused`` field (B3: attributable nulls).
@@ -184,10 +183,11 @@ def build_metrics(
 
     Orchestration only — every figure comes from a pure function over the
     materialised monthly series (read once as ``investment.returns(Frequency.MONTHLY)``) or from the
-    §3 daily adapters over ``investment.source``. Windowed risk metrics take the
-    trailing 1Y/3Y/5Y **calendar-date** slice (``_trailing``: the panel entries
-    dated within ``(as_of − W years, as_of]``, whatever survives — not the last
-    ``12×W`` observations) and fall to ``null`` when history is shorter than the
+    §3 daily adapters over ``investment.source``. The sub-year 1M/3M/6M period
+    returns and the windowed 1Y/3Y/5Y risk metrics take the trailing
+    **calendar-date** slice (``_trailing``: the panel entries dated within
+    ``(as_of − N months, as_of]``, whatever survives — not the last ``N``
+    observations) and fall to ``null`` when history is shorter than the
     window. Daily-basis metrics (drawdown / VaR / CVaR) are ``null``
     when the investment carries no NAV source. rf is an Investment; its
     ``.returns(Frequency.MONTHLY)`` feed the two-series metrics.
@@ -229,9 +229,12 @@ def build_metrics(
     refused: dict[str, str] = {}
 
     # Sub-year period returns (absolute, compounded over the monthly series).
+    # Calendar-date slices (see ``_trailing``): on a gapped panel the N-month
+    # window holds only the months surviving inside (as_of − N months, as_of],
+    # never the last N observations stretched across a data hole.
     for label, months in _PERIOD_MONTHS.items():
         metrics_map[f"return_{label}"] = _on(
-            trailing_anchored(rs, months, anchor) if anchor is not None else None,
+            _trailing(rs, anchor, months) if anchor is not None else None,
             lambda s: period_return_abs(s, s.dates[0], s.dates[-1]),
             metric=f"return_{label}",
             refused=refused,
@@ -327,24 +330,27 @@ def _year_month(d: date) -> tuple[int, int]:
 
 def _trailing(rs: ReturnSeries, as_of: date, months: int) -> ReturnSeries | None:
     """The trailing ``months``-window of ``rs`` ending at ``as_of``, sliced by
-    **calendar date** — the panel entries with ``date > as_of − W years`` and
-    ``date ≤ as_of``, where ``W = months / 12``.
+    **calendar date** — the panel entries with ``date > as_of − months`` and
+    ``date ≤ as_of``.
 
     This is a date slice, not a last-``months``-observations slice: on a panel
     with a data hole inside the window, last-N would reach back across the hole
-    and stretch the window past ``W`` calendar years, so its metric — and the
-    rf / benchmark legs it reconciles against — would cover different periods.
-    The date slice covers exactly the calendar window; its length is whatever
-    survives (honestly fewer than ``months`` for a gapped fund), and the
+    and stretch the window past ``months`` calendar months, so its metric — and
+    the rf / benchmark legs it reconciles against — would cover different
+    periods. The date slice covers exactly the calendar window; its length is
+    whatever survives (honestly fewer than ``months`` for a gapped fund), and the
     downstream metric's own minimum-observation guard decides on that truthful
     count (a window too sparse to compute refuses, disclosed via ``refused``).
+
+    Serves both the whole-year 1Y/3Y/5Y windows and the sub-year 1M/3M/6M period
+    returns — one slicer, one lower-bound convention.
 
     Returns ``None`` on the young-fund path — ``as_of`` absent from ``rs.dates``
     (the panel does not reach the shared anchor), or fewer than ``months`` total
     observations precede it (history shorter than the nominal window). This is
-    the unchanged null contract; the lower bound is computed with the engine's
-    Feb-29-clamped :func:`~foliolens.returns.engine._subtract_years`, never new
-    date arithmetic here.
+    the unchanged null contract; the lower bound is computed with the shared
+    :func:`~foliolens.analytics.rolling._subtract_months` (day-clamped, mirroring
+    the engine's Feb-29 handling), never new date arithmetic here.
     """
     try:
         end_i = rs.dates.index(as_of)
@@ -352,12 +358,12 @@ def _trailing(rs: ReturnSeries, as_of: date, months: int) -> ReturnSeries | None
         return None
     if end_i + 1 < months:
         return None
-    lo_bound = _subtract_years(as_of, months // 12)
+    lo_bound = _subtract_months(as_of, months)
     # Compare at month granularity so the boundary *month* is excluded whole: a
-    # month-end panel dates Feb on the 28th or 29th, and _subtract_years clamps
-    # Feb-29 → Feb-28, so a raw date compare would leak a leap-Feb entry into the
-    # window (13 months, diverging from the calendar year). Keyed on (year,
-    # month), the contiguous window is exactly the last ``months`` entries.
+    # month-end panel dates Feb on the 28th or 29th and the day-clamp can land a
+    # month before the panel's true month-end, so a raw date compare would leak
+    # that boundary-month entry into the window. Keyed on (year, month), the
+    # contiguous window is exactly the last ``months`` entries.
     lo = bisect.bisect_right(rs.dates, _year_month(lo_bound), key=_year_month)
     return ReturnSeries(
         dates=rs.dates[lo : end_i + 1],
