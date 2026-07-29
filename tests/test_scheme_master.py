@@ -16,10 +16,13 @@ import pyarrow as pa
 import pyarrow.parquet as pq
 import pytest
 
+from datetime import date
+
 from foliolens.ingest.scheme_master import (
     SchemeMasterRecord,
     land_scheme_master,
     normalise_category,
+    parse_inception_date,
     parse_option,
     parse_plan,
     scheme_record,
@@ -101,6 +104,51 @@ def test_parse_option(name: str, expected: str | None) -> None:
     assert parse_option(name) == expected
 
 
+# --- inception_date parser (Manifest F-INC) --------------------------------
+#
+# No mftool response fixture is committed in this repo, so the field name is
+# verified here against a *recorded* mftool ``get_scheme_details`` payload
+# (mftool 3.3: ``scheme_start_date`` is a ``{'date': 'DD-MM-YYYY', 'nav': ...}``
+# object, synthesised as the oldest NAV entry). Confirming the same field name
+# on a live response is left as a local follow-up (the universe backfill shards
+# come from the NAV-history endpoint, which does not itself carry the field).
+
+
+def test_parse_inception_date_from_recorded_scheme_details() -> None:
+    # A recorded mftool get_scheme_details payload shape for amfi_code 118424.
+    recorded = {
+        "fund_house": "Bandhan Mutual Fund",
+        "scheme_type": "Open Ended Schemes",
+        "scheme_category": "Equity Scheme - Flexi Cap Fund",
+        "scheme_code": 118424,
+        "scheme_name": "BANDHAN Flexi Cap Fund-Direct Plan-Growth",
+        "scheme_start_date": {"date": "28-09-2005", "nav": "10.00000"},
+    }
+    assert parse_inception_date(recorded) == date(2005, 9, 28)
+
+
+def test_parse_inception_date_accepts_plain_string() -> None:
+    assert parse_inception_date({"scheme_start_date": "01-01-2013"}) == date(2013, 1, 1)
+
+
+@pytest.mark.parametrize(
+    "raw",
+    [
+        {},  # field entirely absent
+        {"scheme_start_date": None},
+        {"scheme_start_date": ""},
+        {"scheme_start_date": {"date": "", "nav": "10.0"}},
+        {"scheme_start_date": {"nav": "10.0"}},  # dict without a date key
+        {"scheme_start_date": "not-a-date"},
+        {"scheme_start_date": "2013-01-01"},  # wrong (ISO) format, not DD-MM-YYYY
+    ],
+)
+def test_parse_inception_date_null_tolerant(raw: dict[str, Any]) -> None:
+    # A missing / empty / unparseable inception is "unknown" (None), never
+    # fabricated and never raised.
+    assert parse_inception_date(raw) is None
+
+
 # --- scheme_record ---------------------------------------------------------
 
 
@@ -154,6 +202,19 @@ def test_scheme_record_category_from_field_not_name() -> None:
     assert rec.option == "idcw"
 
 
+def test_scheme_record_reads_inception_when_present() -> None:
+    rec = scheme_record(
+        "118424",
+        _raw(scheme_start_date={"date": "28-09-2005", "nav": "10.00000"}),
+    )
+    assert rec.inception_date == date(2005, 9, 28)
+
+
+def test_scheme_record_inception_null_when_absent() -> None:
+    # The default _raw() carries no scheme_start_date -> inception is unknown.
+    assert scheme_record("118424", _raw()).inception_date is None
+
+
 # --- land round-trip -------------------------------------------------------
 
 
@@ -174,9 +235,15 @@ def test_land_scheme_master_roundtrip(tmp_path: Path) -> None:
     # Sorted by amfi_code regardless of input order.
     assert table.column("amfi_code").to_pylist() == ["118424", "118535"]
     assert table.column("sebi_category").to_pylist() == ["flexi_cap", "flexi_cap"]
-    # Every column is stored as a string (nullable columns hold real nulls,
-    # exercised in test_land_scheme_master_holds_real_nulls).
-    assert all(pa.types.is_string(f.type) for f in table.schema)
+    # Every column is a string except inception_date, which is a parquet date32
+    # (nullable columns hold real nulls, exercised in
+    # test_land_scheme_master_holds_real_nulls).
+    assert all(
+        pa.types.is_string(f.type)
+        for f in table.schema
+        if f.name != "inception_date"
+    )
+    assert pa.types.is_date(table.schema.field("inception_date").type)
 
 
 def test_land_scheme_master_holds_real_nulls(tmp_path: Path) -> None:
@@ -189,6 +256,23 @@ def test_land_scheme_master_holds_real_nulls(tmp_path: Path) -> None:
     assert row["sebi_category"] is None
     assert row["plan"] is None
     assert row["option"] is None
+    assert row["inception_date"] is None
+
+
+def test_land_scheme_master_roundtrips_inception_date(tmp_path: Path) -> None:
+    # A date survives parquet write -> read as a datetime.date (date32 column);
+    # a null inception coexists in the same column.
+    records = [
+        scheme_record(
+            "118424",
+            _raw(scheme_start_date={"date": "28-09-2005", "nav": "10.0"}),
+        ),
+        scheme_record("999999", _raw(scheme_name="Mystery Fund")),  # no inception
+    ]
+    path = land_scheme_master(records, tmp_path)
+    by_code = {r["amfi_code"]: r for r in pq.read_table(path).to_pylist()}  # type: ignore[no-untyped-call]
+    assert by_code["118424"]["inception_date"] == date(2005, 9, 28)
+    assert by_code["999999"]["inception_date"] is None
 
 
 def test_land_scheme_master_empty_fails_loud(tmp_path: Path) -> None:

@@ -404,6 +404,7 @@ def run(
                 amfi_code=amfi_code,
                 scheme_name=row["scheme_name"],
                 fund_house=row["fund_house"],
+                inception_date=row.get("inception_date"),
                 fund=fund,
                 rf=rf,
                 yardstick=yardstick,

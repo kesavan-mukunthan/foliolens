@@ -5,7 +5,7 @@ including ``scheme_name``, ``fund_house`` and ``scheme_category``. This module
 turns one shard into one ``SchemeMasterRecord`` — no refetch, no network. The
 derivation runs inside ``consolidate()`` in the same pass that lands NAV.
 
-Three fields are parsed by convention:
+Four fields are parsed by convention:
 - ``sebi_category``: the raw AMFI ``scheme_category`` string normalised to a slug
   (e.g. ``Equity Scheme - Flexi Cap Fund`` → ``flexi_cap``). Derived from the
   category field, never from the scheme name — a name may carry "Flexi IDCW"
@@ -13,12 +13,20 @@ Three fields are parsed by convention:
 - ``plan`` (``direct`` | ``regular`` | NULL) and ``option`` (``growth`` | ``idcw``
   | NULL): parsed from the scheme name. Ambiguous or absent → NULL, never guessed
   (CLAUDE.md executor guard; spec-benchmarks §1 accept).
+- ``inception_date`` (date | NULL): read from the mftool scheme-details payload's
+  ``scheme_start_date`` field — a ``{'date': 'DD-MM-YYYY', 'nav': ...}`` object
+  (mftool 3.3 ``get_scheme_details`` shape); the ``date`` sub-field is the
+  inception. A plain ``'DD-MM-YYYY'`` string is accepted too. A shard that does
+  not carry the field → NULL: an unknown inception is never fabricated (and
+  never back-filled from the NAV history itself — mfapi history depth is not
+  true inception, the 103340 lesson). Manifest F-INC.
 
 Storage is separate from the hand-curated ``benchmark_map.csv`` (distinct
 provenance, update mechanics, audit trail); ``load_scheme_master`` joins them.
 """
 from __future__ import annotations
 
+import datetime
 import re
 from dataclasses import dataclass
 from pathlib import Path
@@ -26,6 +34,8 @@ from typing import Any
 
 import pyarrow as pa
 import pyarrow.parquet as pq
+
+_INCEPTION_DATE_FMT = "%d-%m-%Y"
 
 _SCHEME_MASTER_SCHEMA = pa.schema(
     [
@@ -36,6 +46,7 @@ _SCHEME_MASTER_SCHEMA = pa.schema(
         pa.field("sebi_category", pa.string()),  # normalised slug, nullable
         pa.field("plan", pa.string()),  # direct|regular, nullable
         pa.field("option", pa.string()),  # growth|idcw, nullable
+        pa.field("inception_date", pa.date32()),  # date, nullable (unknown)
     ]
 )
 
@@ -105,6 +116,29 @@ def parse_option(scheme_name: str | None) -> str | None:
     return None
 
 
+def parse_inception_date(raw: dict[str, Any]) -> datetime.date | None:
+    """Read the scheme's inception date from a raw mftool shard; NULL if absent.
+
+    mftool's ``get_scheme_details`` payload carries ``scheme_start_date`` as a
+    ``{'date': 'DD-MM-YYYY', 'nav': ...}`` object (mftool 3.3); the ``date``
+    sub-field is the inception. A plain ``'DD-MM-YYYY'`` string is accepted too.
+
+    Returns ``None`` — an explicit "unknown" — when the field is absent, empty,
+    or unparseable: an inception is never fabricated, and never derived from the
+    NAV history itself (mfapi history depth is not the true inception).
+    """
+    start = raw.get("scheme_start_date")
+    if isinstance(start, dict):
+        start = start.get("date")
+    text = str(start or "").strip()
+    if not text:
+        return None
+    try:
+        return datetime.datetime.strptime(text, _INCEPTION_DATE_FMT).date()
+    except ValueError:
+        return None
+
+
 @dataclass(frozen=True)
 class SchemeMasterRecord:
     amfi_code: str
@@ -114,6 +148,9 @@ class SchemeMasterRecord:
     sebi_category: str | None
     plan: str | None
     option: str | None
+    # Nullable — some shards do not carry an inception; NULL is "unknown".
+    # Defaulted so callers predating Manifest F-INC construct unchanged.
+    inception_date: datetime.date | None = None
 
 
 def scheme_record(amfi_code: str, raw: dict[str, Any]) -> SchemeMasterRecord:
@@ -133,6 +170,7 @@ def scheme_record(amfi_code: str, raw: dict[str, Any]) -> SchemeMasterRecord:
         sebi_category=normalise_category(scheme_category),
         plan=parse_plan(scheme_name),
         option=parse_option(scheme_name),
+        inception_date=parse_inception_date(raw),
     )
 
 
@@ -141,8 +179,9 @@ def land_scheme_master(
 ) -> Path:
     """Write ``SchemeMasterRecord``s to ``data_dir/scheme_master.parquet``.
 
-    One row per record, sorted by ``amfi_code``; nullable slug/plan/option carry
-    real NULLs. Overwrites any existing file. Returns the written path.
+    One row per record, sorted by ``amfi_code``; nullable slug/plan/option/
+    inception_date carry real NULLs (``inception_date`` as a parquet ``date32``).
+    Overwrites any existing file. Returns the written path.
     """
     if not records:
         raise ValueError("no scheme_master records to land")
@@ -165,6 +204,9 @@ def land_scheme_master(
             ),
             "plan": pa.array([r.plan for r in ordered], type=pa.string()),
             "option": pa.array([r.option for r in ordered], type=pa.string()),
+            "inception_date": pa.array(
+                [r.inception_date for r in ordered], type=pa.date32()
+            ),
         },
         schema=_SCHEME_MASTER_SCHEMA,
     )

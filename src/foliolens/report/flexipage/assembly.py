@@ -100,8 +100,11 @@ from .render.strings import RF_EXTENSION_REPO_CLAUSE
 #: ``extended`` sub-block (:class:`~foliolens.ingest.iima.RfExtension`,
 #: nullable) — present whenever ``ingest.iima.extend_rf`` carried the series
 #: past its last published month for this run, so the footer can disclose the
-#: carry-forward alongside the always-present IIM-A citation.
-SCHEMA_VERSION = "flexipage-4"
+#: carry-forward alongside the always-present IIM-A citation. ``flexipage-5``
+#: adds each fund entry's nullable ``inception_date`` (ISO date string or null),
+#: read verbatim off the scheme master for the fund-page header (Manifest F-INC)
+#: — a presentation-driven field only, computed nowhere in this module.
+SCHEMA_VERSION = "flexipage-5"
 
 #: Calendar years rendered per fund (``spec-flexicap-page §2``).
 CALENDAR_YEARS: tuple[int, ...] = (2023, 2024, 2025)
@@ -352,6 +355,7 @@ class FundPanel:
     amfi_code: str
     scheme_name: str
     fund_house: str
+    inception_date: date | None
     benchmark: dict[str, str | None]
     metrics: dict[str, float | None]
     calendar_years: dict[str, float | None]
@@ -433,6 +437,7 @@ def build_fund_panel(
     yardstick_code: str,
     tier1_landed: bool,
     as_of: date,
+    inception_date: date | None = None,
 ) -> FundPanel:
     """Assemble one fund's panel: the §5 artifact extended with flexipage fields.
 
@@ -506,6 +511,7 @@ def build_fund_panel(
         amfi_code=amfi_code,
         scheme_name=scheme_name,
         fund_house=fund_house,
+        inception_date=inception_date,
         benchmark=benchmark_block(
             stated_code, stated_tier, yardstick_code, tier1_landed=tier1_landed
         ),
@@ -732,6 +738,11 @@ def assemble_universe(
                 "amfi_code": p.amfi_code,
                 "scheme_name": p.scheme_name,
                 "fund_house": p.fund_house,
+                # Nullable inception (Manifest F-INC): ISO date string, or null
+                # when the scheme master carries no inception for this fund.
+                "inception_date": (
+                    p.inception_date.isoformat() if p.inception_date else None
+                ),
                 "benchmark": p.benchmark,
                 "metrics": p.metrics,
                 "calendar_years": p.calendar_years,
