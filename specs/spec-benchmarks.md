@@ -43,7 +43,9 @@ peer universe (§7) consume them through existing contracts:
   `index_code`. No new series type; renaming to `series_code` is a possible
   future refactor, not part of this spec.
 - **Benchmark = `Investment` with `PricedSource(index NavSeries)`** —
-  `.returns` works unchanged via `to_returns(levels.month_end())`.
+  `.returns(freq)` works unchanged: `benchmark_from_index(levels, cal)` eagerly
+  builds both panels off the index levels, resampling month-end against the
+  benchmark's own-dates calendar (`calendar_from_dates`, never the cohort one).
 - **rf is a return series, not a level series.** IIM-A publishes returns; it
   never passes through `to_returns`. Promote the test-fixture pattern to
   `model/`: `SeriesInvestment` wrapping a materialised `ReturnSeries`. This is
