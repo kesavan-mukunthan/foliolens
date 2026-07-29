@@ -509,6 +509,68 @@ def test_commentary_block_hidden_when_null(tmp_path: Path) -> None:
     assert "None" not in _rendered_text(html)
 
 
+def test_deterministic_commentary_block_shown_when_commentary_null(tmp_path: Path) -> None:
+    """FL-NL-1: when ``commentary`` is null the deterministic floor renders
+    under its own labelled, visually-distinct heading — never the LLM
+    "Commentary" heading, so the two are never confused.
+    """
+    fund = _minimal_fund("DETCOMM01", 0.01, 0.01, 0.01)
+    assert fund["commentary"] is None
+    artifact = {
+        "schema_version": "flexipage-1",
+        "as_of": "2026-07-14",
+        "universe": {
+            "category": "flexi_cap",
+            "count": 1,
+            "yardstick": "NIFTY500TRI",
+            "aggregates": {},
+        },
+        "funds": [fund],
+    }
+    metrics_path = tmp_path / "metrics.json"
+    metrics_path.write_text(json.dumps(artifact))
+    summary = render_site(metrics_path, tmp_path / "site")
+
+    html = (summary.out_dir / "funds" / "DETCOMM01.html").read_text(encoding="utf-8")
+    assert "<h2>Generated summary (deterministic)</h2>" in html
+    assert 'class="commentary commentary-deterministic"' in html
+    assert "<h2>Commentary</h2>" not in html
+    assert "None" not in _rendered_text(html)
+
+
+def test_deterministic_block_absent_when_llm_commentary_present(tmp_path: Path) -> None:
+    """When an LLM commentary block exists, the deterministic floor is absent —
+    only one commentary block ever renders."""
+    fund = _minimal_fund("BOTHCOMM01", 0.01, 0.01, 0.01)
+    fund["commentary"] = {
+        "text": "The fund tracked its category benchmark closely over the period.",
+        "model": "claude-sonnet-4-6",
+        "prompt_version": "commentary-v4",
+        "generated_at": "2026-07-14T00:00:00+00:00",
+    }
+    artifact = {
+        "schema_version": "flexipage-1",
+        "as_of": "2026-07-14",
+        "universe": {
+            "category": "flexi_cap",
+            "count": 1,
+            "yardstick": "NIFTY500TRI",
+            "aggregates": {},
+        },
+        "funds": [fund],
+    }
+    metrics_path = tmp_path / "metrics.json"
+    metrics_path.write_text(json.dumps(artifact))
+    summary = render_site(metrics_path, tmp_path / "site")
+
+    html = (summary.out_dir / "funds" / "BOTHCOMM01.html").read_text(encoding="utf-8")
+    assert "<h2>Commentary</h2>" in html
+    assert "Generated summary (deterministic)" not in html
+    # The class is defined in the stylesheet on every page; assert the block
+    # element itself (which uses it) is absent, not the bare class name.
+    assert 'class="commentary commentary-deterministic"' not in html
+
+
 def test_commentary_block_shown_when_present(tmp_path: Path) -> None:
     fund = _minimal_fund("HASCOMM01", 0.01, 0.01, 0.01)
     fund["commentary"] = {

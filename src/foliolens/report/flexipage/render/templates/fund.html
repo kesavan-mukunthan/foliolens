@@ -58,6 +58,12 @@
 {% if fund.commentary %}
 <h2>Commentary</h2>
 <div class="commentary"><p>{{ fund.commentary.text }}</p></div>
+{% elif deterministic_commentary %}
+<h2>Generated summary (deterministic)</h2>
+<div class="commentary commentary-deterministic">
+  <p class="deterministic-note">Composed from this fund's own figures — no language model.</p>
+  <p>{{ deterministic_commentary }}</p>
+</div>
 {% endif %}
 
 <footer class="provenance">

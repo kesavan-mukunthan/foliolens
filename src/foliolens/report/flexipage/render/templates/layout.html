@@ -47,6 +47,11 @@
   .chart-block svg { max-width: 100%; height: auto; }
   .tier-fallback { display: inline-block; background: #fff3cd; color: #664d03; padding: 0.15rem 0.5rem; border-radius: 0.25rem; font-size: 0.8rem; }
   .commentary { background: #f9f9f9; border: 1px solid #e5e5e5; padding: 1rem; border-radius: 0.4rem; }
+  /* Deterministic commentary floor (FL-NL-1): visually distinct from the LLM
+     commentary block — a dashed accent border and a muted provenance note, so
+     a reader can tell a template-composed summary from a model-written one. */
+  .commentary-deterministic { background: #f4f7fb; border: 1px dashed #9db8d8; border-left: 3px solid #1a5fb4; }
+  .commentary-deterministic .deterministic-note { margin: 0 0 0.5rem; font-size: 0.78rem; color: #555; font-style: italic; }
   footer.site-footer { border-top: 1px solid #ddd; padding: 1rem 1.5rem; font-size: 0.78rem; color: #666; }
   footer.site-footer p { max-width: 62rem; margin: 0.3rem auto; }
 
