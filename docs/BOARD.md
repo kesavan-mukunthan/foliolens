@@ -4,7 +4,7 @@ Authoritative working state between sessions. Updated by rider commits as
 items land. Newer than project memory; older than an open PR — when this
 file and an open PR disagree, the PR wins.
 
-_Last updated: 2026-07-31 (PR 48 merged)._
+_Last updated: 2026-07-29 (PR 51 merged)._
 
 ## In flight
 
@@ -14,16 +14,6 @@ _Last updated: 2026-07-31 (PR 48 merged)._
   STOPS. Stage 1 (parsers, regime-tagged schema, name resolution) proceeds
   only after review confirmation of that report. Stage 2 (backfill) runs
   local, new parquets only.
-- **E local batch** (one local sitting, runsheet: `docs/runsheets/e-local-batch.md`):
-  back up metrics.json → 39-call commentary-v5 batch (ANTHROPIC_API_KEY;
-  model pinned in code) → sanity gate (>8 nulls = stop) → render → push
-  site → spot-checks (118424, 119718, one null-commentary fund's
-  deterministic block, banned-vocab negative check). Same sitting:
-  **scheme-master rebuild** from existing raw shards (no refetch) with the
-  new inception column; report coverage + inception ≤ first-NAV violations
-  (informational); rebuild folded into the runsheet, step 6.
-- **E review** (after publish): validation rejection texts verbatim + ~5
-  sampled commentaries.
 
 ## Queue (fire order; one slot per landed item)
 
@@ -64,6 +54,8 @@ any push; niftyindices stays local unless probed otherwise).
 - Nothing rewrites the local parquet without a current backup; every merge
   is a human click (review-required protection).
 - Model split: runsheet-flavoured tasks Sonnet, design-surface tasks Opus.
+- Runsheets in `docs/runsheets/` are pending instructions; each is deleted,
+  and its board line moved to Done, by the PR that closes its item.
 
 ## Loose ends (no deadline)
 
@@ -74,3 +66,12 @@ any push; niftyindices stays local unless probed otherwise).
 - Fixture enrichment with 119718 at next re-freeze (FL-FIX-1).
 - Docs riders: inception-date contract paragraph rides F-TER stage 1;
   FL-ledger open/closed convention rides the first FL PR to land.
+- Commentary v6: prompt rule — no aggregated percentile claims unless every
+  covered figure matches (149450 finding); optional 149450 re-roll rides
+  any local sitting.
+
+## Done
+
+- **E — commentary v5 + publish + scheme-master rebuild** — closed
+  2026-07-30 on review acceptance; site commit `fc48f79`; 38/39 populated
+  (120492 deterministic); scheme-master inception 100%/0 violations.
