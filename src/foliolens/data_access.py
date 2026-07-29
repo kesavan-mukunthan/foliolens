@@ -71,6 +71,9 @@ class DataAccess:
         ``benchmark_map.csv`` are stored separately (distinct provenance); this
         read is the only place they meet. Consumers never see the two files.
 
+        Every scheme_master column passes through verbatim (``SELECT *``),
+        including the nullable ``inception_date`` (``date``, Manifest F-INC).
+
         Adds four columns to scheme_master:
         - ``benchmark_code`` — the fund's stated benchmark, tier-1 preferred
           (falls back to the alternate if only that is curated). NULL = mapping

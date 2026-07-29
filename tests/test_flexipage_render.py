@@ -97,6 +97,7 @@ def universe(tmp_path: Path) -> dict[str, Path]:
             sebi_category="flexi_cap",
             plan="direct",
             option="growth",
+            inception_date=_START,  # Manifest F-INC: surfaces on the fund header
         ),
         SchemeMasterRecord(
             amfi_code="BBBB02",
@@ -271,6 +272,20 @@ def test_no_tier_fallback_label_for_unflagged_funds(site: RenderSummary) -> None
     for code in ("BBBB02", "CCCC03"):
         html = (site.out_dir / "funds" / f"{code}.html").read_text(encoding="utf-8")
         assert TIER_FALLBACK_LABEL not in html
+
+
+def test_inception_line_present_when_known(site: RenderSummary) -> None:
+    """Manifest F-INC: the fund header shows 'Inception: {date}' for a fund
+    whose scheme master carries an inception (AAAA01, == _START)."""
+    html = (site.out_dir / "funds" / "AAAA01.html").read_text(encoding="utf-8")
+    assert f"Inception: {_START.isoformat()}" in html
+
+
+def test_inception_line_absent_when_unknown(site: RenderSummary) -> None:
+    """A fund with no recorded inception (CCCC03) renders no inception line —
+    silent, per the existing absent-field convention (never 'Inception: None')."""
+    html = (site.out_dir / "funds" / "CCCC03.html").read_text(encoding="utf-8")
+    assert "Inception:" not in html
 
 
 def test_sort_js_present(site: RenderSummary) -> None:

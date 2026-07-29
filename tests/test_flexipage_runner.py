@@ -39,7 +39,7 @@ from foliolens.report.flexipage.runner import (
 from foliolens.data_access import DataAccess
 from foliolens.returns.monthly import monthly_returns
 
-SCHEMA_PATH = Path(__file__).parent.parent / "schemas" / "flexipage-4.schema.json"
+SCHEMA_PATH = Path(__file__).parent.parent / "schemas" / "flexipage-5.schema.json"
 
 _START = date(2018, 6, 30)
 _MATURE_DAYS = 8 * 365  # ~8 years daily -> 96 monthly points; full 5Y panels
@@ -102,6 +102,10 @@ def universe(tmp_path: Path) -> dict[str, Path]:
             sebi_category="flexi_cap",
             plan="direct",
             option="growth",
+            # Manifest F-INC: a known inception surfaces onto the fund header;
+            # equal to this fund's first NAV date (_START) so the informational
+            # `inception_date <= first NAV date` check holds with equality.
+            inception_date=_START,
         ),
         SchemeMasterRecord(
             amfi_code="BBBB02",
@@ -220,10 +224,29 @@ def test_every_universe_fund_present(artifact: dict[str, Any]) -> None:
 
 
 def test_schema_version_and_yardstick(artifact: dict[str, Any]) -> None:
-    assert artifact["schema_version"] == "flexipage-4"
+    assert artifact["schema_version"] == "flexipage-5"
     assert artifact["universe"]["yardstick"] == "NIFTY500TRI"
     for f in artifact["funds"]:
         assert f["benchmark"]["yardstick"] == "NIFTY500TRI"
+
+
+def test_inception_date_surfaces_and_is_null_tolerant(
+    artifact: dict[str, Any], universe: dict[str, Path]
+) -> None:
+    """Manifest F-INC: a known inception surfaces as an ISO date string; a fund
+    whose scheme master carries none surfaces an explicit null (never omitted,
+    never fabricated)."""
+    # AAAA01's scheme master carries an inception (== its first NAV date).
+    assert _fund(artifact, "AAAA01")["inception_date"] == _START.isoformat()
+    # CCCC03's scheme master carries none -> explicit null.
+    assert _fund(artifact, "CCCC03")["inception_date"] is None
+    # Informational consistency check (F-INC item 5): inception_date <= first
+    # NAV date wherever both exist. AAAA01 is the only fixture fund with an
+    # inception, and it holds with equality.
+    da = DataAccess(universe["data_dir"])
+    first_nav = da.load_nav_series("AAAA01").data[0][0]
+    inception = date.fromisoformat(_fund(artifact, "AAAA01")["inception_date"])
+    assert inception <= first_nav
 
 
 def test_rf_disclosure_block_populated(artifact: dict[str, Any]) -> None:
