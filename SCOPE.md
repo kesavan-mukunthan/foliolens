@@ -38,7 +38,7 @@ Four questions the system answers:
 Specs come in two axes. **Capability specs** = what the product can do. **Platform specs** = how it's served at scale. Order is sequenced here; parallel tracks and the platform-phase boundary are marked. Only `spec-returns` is built; `spec-analytics` is ready; the rest are forward references.
 
 **Phase A — analytical core (local, on fixtures)**
-- `spec-returns` — NAV→returns, TWR/SEBI, three-way validation. **Engine + model + DataAccess built; oracle/reconcile/report/cli pending.**
+- `spec-returns` — NAV→returns, TWR/SEBI, three-way reconciliation (own vs oracle vs published). **Engine + model + DataAccess built; oracle/reconcile/report/cli pending.**
 - `spec-analytics` ‖ `spec-benchmarks` — *parallel.* Risk/risk-adjusted metrics over `ReturnSeries`; rf + benchmark-TRI ingestion + fund→benchmark mapping + scheme master (universe metadata derived from backfill shards). Analytics gates on **own-vs-oracle**, not the published reconciliation, which is what lets it run beside return validation. Rendering is owned by specs/spec-flexicap-page.md (static HTML + print-CSS PDF over the metrics artifact); the renderer tail formerly noted here is superseded. **Benchmark data sourcing (Nifty 500 TRI + constituent list) is pulled forward into the data-acquisition track below — spec-benchmarks consumes it rather than sourcing it later.**
 
 **— Platform-phase boundary: opens once analytics is solid —**
@@ -59,6 +59,18 @@ Specs come in two axes. **Capability specs** = what the product can do. **Platfo
 
 **Data-quality backlog (from published reconciliation):**
 - **FL-DQ-1** — fund `103340` carries pre-Nov-2009 NAV history belonging to a different scheme/plan (a +900% single-session discontinuity 2009-10-30→2009-11-02), which corrupts its since-inception return (the shorter trailing windows are clean). Truncate or re-source the pre-2009-11 history, and audit the full universe for single-step NAV jumps at ingestion time when the backfill is rebuilt. Guarded now by `tests/validation/test_nav_quality.py` (no single-step move > 50%), `xfail(strict=True)` on `103340` so the guard flips loudly the day the data is fixed; carried in the meantime as a reconciliation exemption (`fixtures/reconciliation_exemptions.csv`).
+- **FL-DQ-2** *(origin: universe ingest audit)* — the ingest audit found **228 of 7913** funds with *internal hole-months*: month-length gaps in the interior of an otherwise populated NAV history (distinct from the legitimately-short young-fund panel). These silently truncate trailing windows and mislabel adjacent-month returns. Persist the per-fund offender list beside the audit output (worst offenders first) and decide per-fund between re-source, interpolate-and-flag, or exempt; do not let a hole-month pass unrecorded.
+
+**Engineering backlog (chat ledger → repo — one line each, origin tagged):**
+- **FL-CAL-3** *(origin: calendar/returns review)* — sub-year (<1Y) trailing returns should be taken **point-to-point** from the period's NAV endpoints (the SEBI absolute leg), not composed from the monthly panel — keeps the <1Y legs off calendar-window slicing and month-boundary drift.
+- **FL-CAL-4** *(origin: calendar review)* — stamp the derived `TradingCalendar`'s **provenance** (cohort, quorum, date span) into the metrics artifact; and **widen the derivation base** (pull in adjacent funds) when a cohort is too thin for a reliable majority-publish quorum.
+- **FL-RF-1** *(origin: analytics rf convention)* — wire the **RBI-direct** source for extending the 91-day T-bill rf past the IIMA release lag; fixtures stay inside the IIMA range until it lands.
+- **FL-ING-1** *(origin: universe ingest)* — **incremental/resumable** universe ingest that splits failed AMFI codes into **transient** (retry with backoff) vs **permanent** (record and skip) buckets, instead of an all-or-nothing pass.
+- **FL-ART-1** *(origin: `artifact.py` review)* — make `as_of` a **required** argument of `build_metrics` (it currently defaults to the fund's own last month), so every run pins one explicit shared as-of and no fund silently self-anchors in a cross-sectional run.
+- **FL-IO-1** *(origin: `data_access.py`)* — **assert the loaded dtype is `decimal128`** at the read boundary, so a silent DOUBLE cast fails loud rather than flowing into a figure of record.
+- **FL-TOOL-1** *(origin: tooling)* — add an explicit **`[tool.ruff]`** section to `pyproject.toml` (rule selection, line length) instead of linting on ruff defaults.
+- **FL-FIX-1** *(origin: fixtures)* — **fixture enrichment**: add fund `119718` to the frozen fixture set (edge case surfaced during the build) so its behaviour is covered by own-vs-oracle.
+- **FL-NL-1** *(origin: F4 commentary)* — **deterministic commentary fallback** for `null`-commentary funds: when the LLM call fails or refuses, render a metric-derived deterministic block rather than leaving the fund with no narrative.
 
 **Old→new map:** step-0→`spec-returns`; new→`spec-analytics`,`spec-benchmarks`; steps 1–2→`spec-personal` (personal metrics just reuse `spec-analytics`); step-3→`spec-monitor`+platform; step-4→`spec-scale`; step-5→`spec-monitor`; step-6→`spec-screener`; step-7→`spec-recommender`; step-8→`spec-nl`; step-9→`spec-factor`; step-10→`spec-construct`; step-11→`spec-finance`.
 

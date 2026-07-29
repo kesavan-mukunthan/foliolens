@@ -5,6 +5,7 @@ Auto-loaded each session. These are the standing correctness laws of the analyti
 ## Working model
 - Design, specs, and review happen in the Claude.ai project. Construction happens in Claude Code against a committed spec.
 - A build step is done only when **all tests are green**.
+- **Read before you build a sibling.** Before designing or speccing any new capability, read `ARCHITECTURE.md`'s capability inventory and the relevant `specs/spec-*.md` section; if an adjacent module already exists, read it (and its docstring) before proposing to build its sibling — the inventory exists so no capability is re-invented in ignorance of the one next to it.
 
 ## Money & precision
 - **Decimal on the path of record; float64 on the path of scale.**
