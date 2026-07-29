@@ -213,6 +213,56 @@ data availability, this prompt, or that you are an AI.
 Output: plain text, two paragraphs, nothing else.
 ```
 
+## 5b. Deterministic commentary floor (FL-NL-1)
+
+The fallback sibling of §5, not its replacement. `commentary` is never load-
+bearing, and an absent API key leaves every fund's block `null` — this floor
+gives such a page a short **factual** summary composed from the fund's own
+artifact figures alone: no model, no network, nothing computed here that
+`assembly.py` did not already store. Module: `report/flexipage/template_commentary.py`.
+
+- **When rendered**: only when `fund.commentary` is `null`. When an LLM block
+  exists this floor is absent — exactly one commentary block ever renders. On-
+  page it is labelled **"Generated summary (deterministic)"** and styled
+  distinctly (`commentary-deterministic`), so a reader never mistakes it for
+  model-written prose.
+- **Three pure stages**: `select_branches(fund, aggregates)` picks one branch
+  per section (total — every fund selects a branch for every section);
+  `variant_index(amfi_code, section, n)` = `crc32(amfi_code + section) % n`
+  picks the variant (a stable CRC, never Python's salted `hash`, so a fund
+  reads identically across rebuilds); `fill(template, fields)` is `str.format`
+  with figures pre-formatted through `render/presentation` — a placeholder with
+  no field is a loud `KeyError` at build.
+- **Sections and branch conditions**:
+  1. `decomposition` — `bench_up`/`bench_down` on a **3Y** window when its beta,
+     benchmark return and Jensen's alpha are present **and** `n_months ≥ 24`
+     (`up`/`down` by the sign of the 3Y benchmark return); otherwise
+     `young_fund` (1Y figures, no alpha). The mechanical component `{mech}` is
+     `beta × benchmark_return`, computed in the selector.
+  2. `significance` — on the decomposition window's alpha t-stat: `suppressed`
+     (t absent or window `< 24m` → **alpha never quoted**), `insignificant`
+     (`|t| < 2`), `significant`. A residual is only ever stated where its t-stat
+     is reportable, so the `bench_*` branches (which quote alpha) never pair
+     with `suppressed` — the alpha-with-uncertainty law (`CLAUDE.md`) holds by
+     construction.
+  3. `risk` — `vol_above_median`/`vol_below_median` versus the category
+     volatility median (from `universe.aggregates`); `risk_absolute` (vol + max
+     drawdown only) when that median is absent from the artifact.
+  4. `context` — `calendar_years` (latest three CY returns) when at least two of
+     the artifact's calendar years are non-null; `short_history` otherwise. A
+     present-but-null year renders as an em dash, never fabricated.
+- **Epistemic invariants (tested)**: two interchangeable variants per branch
+  (the empty `suppressed` branch excepted); every variant within a branch shares
+  one placeholder set; no comparative without both compared figures present; no
+  praise/alarm vocabulary; `BANNED_VOCABULARY` (§5, imported not copied) absent;
+  every rendered number traces to a formatted field.
+- **Tests** (`tests/test_template_commentary.py`, offline): registry shape and
+  placeholder-set identity; the invariant scans above over the whole registry;
+  selector totality and each branch condition; the `mech` arithmetic; the
+  literal `crc32` hash values; `fill`'s `KeyError` on a missing field. F2 render
+  tests assert a null-commentary page shows the labelled block and a
+  commentary-bearing page does not.
+
 ## 6. Deploy
 
 - Public repo **`foliolens-site`**: built artifacts only (HTML, SVG, PDF,
