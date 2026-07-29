@@ -26,11 +26,12 @@ from foliolens.analytics import (
     volatility,
 )
 from foliolens.analytics.metrics import period_return_abs
-from foliolens.analytics.series_ops import between
+from foliolens.analytics.series_ops import between, trailing_anchored
 from foliolens.model.investments import ShareClass, SeriesInvestment
 from foliolens.model.value_objects import ReturnSeries
+from foliolens.returns.engine import _subtract_years
 from foliolens.returns.frequency import Frequency
-from fixtures import daily_shareclass, returns_series
+from fixtures import daily_shareclass, month_end_dates, returns_series
 
 
 def _is_month_end(d: date) -> bool:
@@ -271,3 +272,76 @@ def test_young_fund_round_trips() -> None:
     mr = build_metrics(young, _rf_for(young.returns(Frequency.MONTHLY)))
     text = json.dumps(mr.to_dict(), allow_nan=False)
     assert MetricsResult.from_dict(json.loads(text)) == mr
+
+
+# ---------------------------------------------------------------------------
+# Trailing windows are calendar-date slices, not last-N observations
+# ---------------------------------------------------------------------------
+
+
+def _gapped_panel() -> ReturnSeries:
+    """24 consecutive month-ends (2023-01 .. 2024-12) with two mid-series months
+    removed — 2024-06-30 and 2024-07-31 — a genuine data hole *inside* the year
+    trailing 2024-12-31. 22 surviving entries; the 1Y window ending 2024-12-31
+    spans 12 calendar months but holds only 10 of them."""
+    dates = list(month_end_dates(24))
+    values = [((i % 5) - 1) / 100.0 for i in range(24)]
+    drop = {17, 18}  # 2024-06-30, 2024-07-31
+    keep = [i for i in range(24) if i not in drop]
+    return ReturnSeries(
+        dates=tuple(dates[i] for i in keep),
+        values=np.array([values[i] for i in keep], dtype=np.float64),
+        frequency=Frequency.MONTHLY,
+    )
+
+
+def test_trailing_window_gapped_fund_is_date_sliced() -> None:
+    # The 1Y trailing window at the anchor is the calendar-year slice
+    # (as_of - 1y, as_of], NOT the last 12 observations. With a hole inside the
+    # year it holds 10 entries, and no entry older than as_of - 1y appears.
+    from foliolens.analytics.artifact import _trailing
+
+    rs = _gapped_panel()
+    as_of = rs.dates[-1]  # 2024-12-31
+    lo = _subtract_years(as_of, 1)  # 2023-12-31
+
+    w = _trailing(rs, as_of, 12)
+    assert w is not None
+    assert len(w) == 10  # n_months: the honest count, not a fabricated 12
+    assert all(lo < d <= as_of for d in w.dates)
+    assert not any(d <= lo for d in w.dates)  # no entry older than as_of - 1y
+
+    # Contrast: the last-N slicer stretches back across the hole to 12 entries
+    # spanning 14 calendar months (2023-11 .. 2024-12) — the class this fix removes.
+    old = trailing_anchored(rs, 12, as_of)
+    assert old is not None
+    assert len(old) == 12
+    assert old.dates[0] <= lo  # reaches back before the calendar year boundary
+
+
+def test_trailing_window_contiguous_matches_last_n() -> None:
+    # For a gap-free panel, date-slicing and last-N select identical entries —
+    # the fix is a no-op for the normal case (pinned for 1Y/3Y/5Y).
+    from foliolens.analytics.artifact import _trailing
+
+    rs = returns_series(
+        [((i % 7) - 3) / 100.0 for i in range(72)], start_year=2018, start_month=1
+    )
+    as_of = rs.dates[-1]  # 2023-12-31 (December anchor — no leap-Feb boundary)
+    for months in (12, 36, 60):
+        want = trailing_anchored(rs, months, as_of)
+        got = _trailing(rs, as_of, months)
+        assert want is not None and got is not None
+        assert got.dates == want.dates
+        assert list(got.values) == list(want.values)
+
+
+def test_trailing_window_young_fund_still_refuses() -> None:
+    # A fund with fewer than the nominal observations has no full-length window:
+    # the young-fund null contract is unchanged (window absent, not a partial slice).
+    from foliolens.analytics.artifact import _trailing
+
+    rs = returns_series([0.01, 0.02, 0.03])  # 3 months only
+    as_of = rs.dates[-1]
+    assert _trailing(rs, as_of, 12) is None
+    assert _trailing(rs, as_of, 36) is None
