@@ -27,12 +27,25 @@ from .frequency import Frequency
 def month_end(nav: NavSeries, cal: TradingCalendar) -> NavSeries:
     """Resample ``nav`` to one point per complete calendar month.
 
-    Month ``M`` is emitted iff ``nav`` carries a NAV dated exactly
-    ``cal.last_trading_day(M)`` *and* at least one NAV dated in the strictly
-    next calendar month (``M + 1``) — the trailing, still-accumulating month
-    is never emitted (no look-ahead-free partial month). The emitted point is
-    relabelled onto the true calendar month-end date of ``M``, not the trading
-    day the NAV was actually dated on.
+    Month ``M`` is emitted iff (a) the fund's last NAV *within* ``M`` is dated
+    **on or after** ``cal.last_trading_day(M)`` — the true last trading day of
+    ``M`` — *and* (b) at least one NAV is dated in the strictly next calendar
+    month (``M + 1``). Condition (b) withholds the trailing, still-accumulating
+    month (no look-ahead). The emitted value is that last in-month NAV,
+    relabelled onto the true calendar month-end date of ``M``, not the day the
+    NAV was actually dated on.
+
+    Condition (a) is the completeness test: a month is complete once the fund
+    reached its close. The closing NAV may be dated *exactly* on the last
+    trading day, or *after* it — a weekend-dated close (last trading day a
+    Friday, NAV stamped the Saturday) or a fiscal-year-end (last trading day
+    the 28th, NAV stamped the 31st) — either way the fund demonstrably reached
+    the month's end. Only a *truncated* month, whose last NAV falls strictly
+    *before* the last trading day, is rejected: the fund's history stopped
+    short of the close, so the month is incomplete.
+
+    ``cal.last_trading_day(M)`` returning ``None`` (``M`` absent from the
+    derived calendar entirely) means ``M`` is not emitted.
     """
     if not nav.data:
         return NavSeries(nav.amfi_code, ())
@@ -46,8 +59,8 @@ def month_end(nav: NavSeries, cal: TradingCalendar) -> NavSeries:
         last_trading_day = cal.last_trading_day(year, month)
         if last_trading_day is None:
             continue
-        nav_on_last_trading_day = by_month[(year, month)].get(last_trading_day)
-        if nav_on_last_trading_day is None:
+        last_nav_date = max(by_month[(year, month)])
+        if last_nav_date < last_trading_day:
             continue
         next_year, next_month = (year + 1, 1) if month == 12 else (year, month + 1)
         if (next_year, next_month) not in by_month:
@@ -55,7 +68,7 @@ def month_end(nav: NavSeries, cal: TradingCalendar) -> NavSeries:
         calendar_month_end = date(
             year, month, _calendar_module.monthrange(year, month)[1]
         )
-        result.append((calendar_month_end, nav_on_last_trading_day))
+        result.append((calendar_month_end, by_month[(year, month)][last_nav_date]))
 
     return NavSeries(nav.amfi_code, tuple(result))
 

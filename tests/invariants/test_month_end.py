@@ -14,6 +14,11 @@
     calendar derived from 108466 alone — and a month where 108466's own last
     NAV predates the cohort's last trading day is rejected under the cohort
     calendar specifically
+(h) on-or-after completeness (tail-match fix): a month whose last in-month
+    NAV is dated on-or-after the last trading day (a weekend-dated or
+    fiscal-year-end close) is emitted; only a truncated month (last NAV before
+    the last trading day) is rejected, and a close-reached-but-no-M+1 month is
+    still withheld
 
 GREEN (this commit): (a)-(c) run over the calendar-derived
 ``returns/monthly.monthly_returns`` path — the trading calendar (from
@@ -35,6 +40,7 @@ from __future__ import annotations
 import calendar as _calendar_module
 import statistics
 from datetime import date
+from decimal import Decimal
 from pathlib import Path
 
 import numpy as np
@@ -270,3 +276,119 @@ def test_cohort_calendar_rejects_month_where_fund_lags_cohort_last_trading_day()
     single_months = _monthly_year_months(lagged_nav, single_cal_lagged)
     assert (2025, 3) in single_months
     assert (2025, 4) in single_months
+
+
+# ---------------------------------------------------------------------------
+# (h) On-or-after completeness (tail-match fix)
+#
+# A month is complete once the fund's last NAV within it is dated *on or after*
+# the cohort's last trading day — reaching the month's close, whether the
+# closing NAV is dated exactly on the last trading day, or on a later weekend /
+# fiscal-year-end date, proves the month closed. Only a fund whose last NAV
+# predates the last trading day (a truncated month) is rejected. These tests
+# pin that boundary directly on ``month_end`` / ``monthly_returns`` with
+# hand-built synthetic calendars (no fixture round-trip). The two asserting the
+# *new* behaviour (weekend close, fiscal-year-end) are RED on main; the two
+# guards (truncation still rejected, trailing still withheld) hold either way.
+# ---------------------------------------------------------------------------
+
+# A common four-month calendar whose January last trading day (2026-01-30, a
+# Friday) precedes the calendar month-end (2026-01-31, a Saturday) — the exact
+# 119718 geometry.
+_TAIL_CAL_DAYS = (
+    date(2025, 11, 28),
+    date(2025, 12, 31),
+    date(2026, 1, 30),   # last trading day of Jan; before the 31st
+    date(2026, 2, 27),
+    date(2026, 3, 31),
+)
+
+
+def test_weekend_dated_close_is_emitted_119718_shape() -> None:
+    # 119718 (SBI Flexicap) geometry: the cohort's last January trading day is
+    # 2026-01-30 (Fri); the fund carries no NAV that day but one dated
+    # 2026-01-31 (Sat) — it demonstrably reached January's close. Under the
+    # on-or-after completeness rule January is emitted, valued at the
+    # weekend-dated NAV, labelled on the calendar month-end, and both returns
+    # of the k-1 -> k -> k+1 chain (Dec -> Jan -> Feb) exist.
+    cal = calendar_from_dates(_TAIL_CAL_DAYS)
+    nav = NavSeries(
+        "119718",
+        (
+            (date(2025, 11, 28), Decimal("100")),
+            (date(2025, 12, 31), Decimal("110")),
+            (date(2026, 1, 31), Decimal("121")),   # Sat close, one day after 01-30
+            (date(2026, 2, 27), Decimal("125")),
+            (date(2026, 3, 31), Decimal("130")),
+        ),
+    )
+
+    resampled = dict(month_end(nav, cal).data)
+    jan_end = date(2026, 1, 31)
+    assert jan_end in resampled, "January (Sat close, on-or-after 01-30) must be emitted"
+    assert resampled[jan_end] == Decimal("121"), "value is the weekend-dated NAV"
+    assert _is_calendar_month_end(jan_end), "label is the calendar month-end"
+
+    by_date = dict(zip(monthly_returns(nav, cal).dates, monthly_returns(nav, cal).values))
+    assert date(2026, 1, 31) in by_date, "Dec -> Jan return exists"
+    assert date(2026, 2, 28) in by_date, "Jan -> Feb return exists"
+
+
+def test_fiscal_year_end_31march_emitted() -> None:
+    # Fiscal-year-end shape: a calendar whose March last trading day is the
+    # 28th, with the fund's NAV dated the 31st (year-end close, three days
+    # after the last trading day). The 31st is on-or-after the last trading
+    # day -> March is emitted, valued and labelled on 2025-03-31.
+    cal = calendar_from_dates(
+        (date(2025, 2, 27), date(2025, 3, 28), date(2025, 4, 30))
+    )
+    nav = NavSeries(
+        "FYE",
+        (
+            (date(2025, 2, 27), Decimal("100")),
+            (date(2025, 3, 31), Decimal("108")),   # 3 days after the 03-28 close
+            (date(2025, 4, 30), Decimal("110")),
+        ),
+    )
+    resampled = dict(month_end(nav, cal).data)
+    assert date(2025, 3, 31) in resampled
+    assert resampled[date(2025, 3, 31)] == Decimal("108")
+
+
+def test_truncated_month_still_rejected() -> None:
+    # Guard (holds either way): the fund's last January NAV is dated the 20th,
+    # ten days before the 01-30 last trading day — the fund did not reach the
+    # month's close, so January is a truncated month and stays rejected. By
+    # adjacency, February's return (Jan -> Feb) never exists either.
+    cal = calendar_from_dates(_TAIL_CAL_DAYS)
+    nav = NavSeries(
+        "TRUNC",
+        (
+            (date(2025, 11, 28), Decimal("100")),
+            (date(2025, 12, 31), Decimal("110")),
+            (date(2026, 1, 20), Decimal("121")),   # truncated: before 01-30
+            (date(2026, 2, 27), Decimal("125")),
+            (date(2026, 3, 31), Decimal("130")),
+        ),
+    )
+    resampled_months = {(d.year, d.month) for d, _ in month_end(nav, cal).data}
+    assert (2026, 1) not in resampled_months
+    assert date(2026, 2, 28) not in monthly_returns(nav, cal).dates
+
+
+def test_trailing_month_withheld_even_when_close_reached() -> None:
+    # Guard (holds either way): February's last NAV (2026-02-28) is on-or-after
+    # its 02-27 last trading day, so the month reached its close — but no March
+    # NAV has been published yet, so completeness condition (b) withholds it.
+    # The on-or-after relaxation must not leak a still-trailing month.
+    cal = calendar_from_dates((date(2026, 1, 30), date(2026, 2, 27)))
+    nav = NavSeries(
+        "TRAIL",
+        (
+            (date(2026, 1, 30), Decimal("100")),
+            (date(2026, 2, 28), Decimal("110")),   # close reached, but no March NAV
+        ),
+    )
+    resampled_months = {(d.year, d.month) for d, _ in month_end(nav, cal).data}
+    assert (2026, 2) not in resampled_months
+    assert (2026, 1) in resampled_months   # January is complete (Feb NAV exists)
