@@ -345,3 +345,57 @@ def test_trailing_window_young_fund_still_refuses() -> None:
     as_of = rs.dates[-1]
     assert _trailing(rs, as_of, 12) is None
     assert _trailing(rs, as_of, 36) is None
+
+
+# ---------------------------------------------------------------------------
+# Sub-year period returns are calendar-date slices too (1M/3M/6M)
+# ---------------------------------------------------------------------------
+
+
+def test_period_slice_gapped_fund_is_date_sliced() -> None:
+    # The N-month period at the anchor is the calendar slice (as_of - N months,
+    # as_of], NOT the last N observations. On a gapped panel it holds only the
+    # months that survive inside the span, and none older than as_of - N months.
+    from foliolens.analytics.artifact import _trailing
+
+    rs = _gapped_panel()  # 22 entries, holes at 2024-06-30 / 2024-07-31
+
+    # 3M at 2024-12-31: the hole is OUTSIDE the trailing quarter → the three
+    # recent months, exactly the entries dated in (2024-09-30, 2024-12-31].
+    w3 = _trailing(rs, rs.dates[-1], 3)
+    assert w3 is not None
+    assert list(w3.dates) == [date(2024, 10, 31), date(2024, 11, 30), date(2024, 12, 31)]
+
+    # 6M anchored 2024-08-31: the hole sits INSIDE the half-year → only the four
+    # survivors (not six), all within bounds, none older than as_of - 6 months.
+    anchor6 = date(2024, 8, 31)
+    w6 = _trailing(rs, anchor6, 6)
+    assert w6 is not None
+    assert list(w6.dates) == [
+        date(2024, 3, 31),
+        date(2024, 4, 30),
+        date(2024, 5, 31),
+        date(2024, 8, 31),
+    ]
+    assert len(w6) == 4
+    # None older than as_of - 6 months (2024-02): the assertion that fails on the
+    # pre-fix branch, where last-N stretches back across the hole.
+    assert all((d.year, d.month) > (2024, 2) for d in w6.dates)
+
+    old6 = trailing_anchored(rs, 6, anchor6)  # last-N contrast (the removed defect)
+    assert old6 is not None and len(old6) == 6
+    assert old6.dates[0] == date(2024, 1, 31)  # older than as_of - 6 months
+
+
+def test_contiguous_period_returns_unchanged_by_date_slice() -> None:
+    # Gap-free fund: return_1M/3M/6M are identical whether sliced last-N (old) or
+    # by calendar date (new) — the no-op pin, same pattern as the windowed test.
+    fund, rf = _healthy_fund(), _rf()
+    rs = fund.returns(Frequency.MONTHLY)
+    as_of = rs.dates[-1]
+    mr = build_metrics(fund, rf)
+    for label, months in (("1M", 1), ("3M", 3), ("6M", 6)):
+        sliced = trailing_anchored(rs, months, as_of)
+        assert sliced is not None
+        expected = period_return_abs(sliced, sliced.dates[0], sliced.dates[-1])
+        assert mr.metrics[f"return_{label}"] == expected
