@@ -4,16 +4,11 @@ Authoritative working state between sessions. Updated by rider commits as
 items land. Newer than project memory; older than an open PR — when this
 file and an open PR disagree, the PR wins.
 
-_Last updated: 2026-07-29 (PR 51 merged)._
+_Last updated: 2026-07-30 (PR 53 merged)._
 
 ## In flight
 
-- **F-TER stage 0** — cloud session fetching real AMFI TER/AAUM disclosure
-  files (one pre-Apr-2026 TER month, one post — SEBI MF Regulations 2026
-  regime break — one AAUM drop); reports formats/columns/IP behaviour then
-  STOPS. Stage 1 (parsers, regime-tagged schema, name resolution) proceeds
-  only after review confirmation of that report. Stage 2 (backfill) runs
-  local, new parquets only.
+(none — F-TER stage 0 closed below; stages 1–2 queued as item 4)
 
 ## Queue (fire order; one slot per landed item)
 
@@ -75,3 +70,15 @@ any push; niftyindices stays local unless probed otherwise).
 - **E — commentary v5 + publish + scheme-master rebuild** — closed
   2026-07-30 on review acceptance; site commit `fc48f79`; 38/39 populated
   (120492 deterministic); scheme-master inception 100%/0 violations.
+- **F-TER stage 0** — closed 2026-07-30, `OBSERVED`:
+  `docs/ter-aaum-source-verification-2026-07.md`. Local re-run (real AMFI
+  files) supersedes the cloud sandbox's egress-blocked `[INDEXED]` attempt
+  and overturns two of its claims — scheme-level (`amfi_code`) AAUM *is*
+  sourceable from AMFI's central page (per-AMC selection, not a separate
+  "individual AMC" page), and that page is quarterly, not monthly. Also
+  found: TER disclosed daily, and every TER file's footer disclaimer is
+  static post-2026 boilerplate regardless of the file's own regime — never
+  infer methodology from the footer. Open items before Stage 1: re-run the
+  lost scheme-wise dropdown-label probe, confirm a missing AAUM industry
+  quarter, decide the AAUM per-AMC ingestion shape, and keep/discard the
+  10 extra TER months pulled beyond stage-0 scope.
