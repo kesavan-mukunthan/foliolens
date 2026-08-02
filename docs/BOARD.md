@@ -4,28 +4,25 @@ Authoritative working state between sessions. Updated by rider commits as
 items land. Newer than project memory; older than an open PR — when this
 file and an open PR disagree, the PR wins.
 
-_Last updated: 2026-07-30 (PR 53 merged)._
+_Last updated: 2026-08-02 (PR FL-DQ-2 open)._
 
 ## In flight
 
-(none — F-TER stage 0 closed below; stages 1–2 queued as item 4)
+(none — FL-DQ-2 audit PR open; see PR for artifact)
 
 ## Queue (fire order; one slot per landed item)
 
-1. **FL-DQ-2** — hole-month audit artifact (228/7,913 funds with internal
-   zero-NAV months; classify upstream-vs-fetch via raw shards). Gates
-   multi-category, esp. debt. Sonnet-cloud OK.
-2. **FL-IO-1** — decimal128 assertion at read (`data_access.py`). Gates the
+1. **FL-IO-1** — decimal128 assertion at read (`data_access.py`). Gates the
    GCS move. Sonnet-cloud OK.
-3. **FL-ING-1** — incremental ingest keyed (code, date) + failed_codes
+2. **FL-ING-1** — incremental ingest keyed (code, date) + failed_codes
    split transient/permanent. Gates scheduled jobs. Opus.
-4. **F-TER stages 1–2** — after stage-0 confirmation. Opus; backfill local.
-5. **FL-CAL-3** — sub-year returns point-to-point via the return engine. Opus.
-6. **FL-CAL-4** — calendar provenance in artifact + widened derivation base
+3. **F-TER stages 1–2** — after stage-0 confirmation. Opus; backfill local.
+4. **FL-CAL-3** — sub-year returns point-to-point via the return engine. Opus.
+5. **FL-CAL-4** — calendar provenance in artifact + widened derivation base
    for thin cohorts.
-7. **FL-ART-1** — `as_of` required in `build_metrics`; single-fund default
+6. **FL-ART-1** — `as_of` required in `build_metrics`; single-fund default
    moves to the caller.
-8. **FL-TOOL-1** — `[tool.ruff]` config + resulting cleanup. **Last, alone**
+7. **FL-TOOL-1** — `[tool.ruff]` config + resulting cleanup. **Last, alone**
    (repo-wide diff; conflicts with everything open).
 
 ## After F (agreed order)
@@ -54,19 +51,28 @@ any push; niftyindices stays local unless probed otherwise).
 
 ## Loose ends (no deadline)
 
-- rf worktree removal: `git worktree remove ../foliolens-rf`.
 - Manager-tenure CSV — 39 rows, hand-curated, source-dated.
 - IIM-A H1-2026 rf refresh when published (carry-forward self-heals; cap 12
   months, escalated disclosure past 6).
 - Fixture enrichment with 119718 at next re-freeze (FL-FIX-1).
-- Docs riders: inception-date contract paragraph rides F-TER stage 1;
-  FL-ledger open/closed convention rides the first FL PR to land.
+- Docs riders: inception-date contract paragraph rides F-TER stage 1.
 - Commentary v6: prompt rule — no aggregated percentile claims unless every
   covered figure matches (149450 finding); optional 149450 re-roll rides
   any local sitting.
 
 ## Done
 
+- **FL-DQ-2** — hole-month audit closed 2026-08-02. Artifact:
+  `docs/audits/hole-months-2026-08.csv`. 3,711 hole-months across 228/7,913
+  funds. All 228 upstream (fetch_side = 0). Step-5 spot-check (seed=42,
+  n=12): 10 still-absent, 2 API timeouts, 0 now-present — threshold not
+  triggered. Local (shard corpus is the classification evidence).
+  FL-ledger open/closed convention: a ledger entry is *open* when a
+  corresponding parquet dataset or ingest artefact does not yet exist or has
+  not been reconciled; it is *closed* once the artefact exists, a test
+  covers it, and the board line is moved here — same discipline as runsheet
+  deletion. This convention is defined in `SCOPE.md` §Ledger and rides this
+  PR.
 - **E — commentary v5 + publish + scheme-master rebuild** — closed
   2026-07-30 on review acceptance; site commit `fc48f79`; 38/39 populated
   (120492 deterministic); scheme-master inception 100%/0 violations.
@@ -81,4 +87,9 @@ any push; niftyindices stays local unless probed otherwise).
   infer methodology from the footer. Open items before Stage 1: re-run the
   lost scheme-wise dropdown-label probe, confirm a missing AAUM industry
   quarter, decide the AAUM per-AMC ingestion shape, and keep/discard the
-  10 extra TER months pulled beyond stage-0 scope.
+  10 extra TER months pulled beyond stage-0 scope. Adjudicated post-close:
+  AAUM = per-AMC scheme-wise quarterly, aaum.parquet(amfi_code, quarter,
+  aaum), universe AMCs only; industry file not ingested; 10 extra TER
+  months kept for stage-2 fixtures/backfill; dropdown probe + missing
+  industry quarter fold into stage 2; browser-automation acquisitions
+  must report selections before session end.
