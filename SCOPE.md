@@ -6,7 +6,7 @@
 
 A multi-agent, finance-domain system for fund selection and monitoring. Built as both a learning vehicle (threads through an 8-week GenAI curriculum) and a consumer-facing product for Indian mutual fund investors. Not a production trading system.
 
-**Data sources.** NAV and scheme metadata come from **mftool** (a Python wrapper over AMFI), now the canonical source — not mfapi.in. mftool/AMFI provides **NAV and scheme metadata only**. Holdings, benchmark returns (TRI), benchmark constituents, expense ratios, and AUM are **not available from this source** and must be sourced separately (see Unsourced Data).
+**Data sources.** NAV runs on a two-mechanism design (specs/spec-scale.md §1): AMFI's daily **NAVAll.txt** is the steady-state source for freshness and universe discovery; **mftool/mfapi** is used selectively for first-sight backfill of new schemes and deliberate correction refetches. Scheme metadata derives from backfill shards. AMFI/mfapi provide **NAV and scheme metadata only**. Holdings, benchmark returns (TRI), benchmark constituents, expense ratios, and AUM are **not available from this source** and must be sourced separately (see Unsourced Data).
 
 ## Business Problem
 
