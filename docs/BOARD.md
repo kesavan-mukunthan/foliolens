@@ -4,11 +4,11 @@ Authoritative working state between sessions. Updated by rider commits as
 items land. Newer than project memory; older than an open PR — when this
 file and an open PR disagree, the PR wins.
 
-_Last updated: 2026-08-02 (PR FL-DQ-2 open)._
+_Last updated: 2026-08-02 (PR 54 merged)._
 
 ## In flight
 
-(none — FL-DQ-2 audit PR open; see PR for artifact)
+(none — next: FL-IO-1, queue item 1)
 
 ## Queue (fire order; one slot per landed item)
 
@@ -67,12 +67,11 @@ any push; niftyindices stays local unless probed otherwise).
   funds. All 228 upstream (fetch_side = 0). Step-5 spot-check (seed=42,
   n=12): 10 still-absent, 2 API timeouts, 0 now-present — threshold not
   triggered. Local (shard corpus is the classification evidence).
-  FL-ledger open/closed convention: a ledger entry is *open* when a
-  corresponding parquet dataset or ingest artefact does not yet exist or has
-  not been reconciled; it is *closed* once the artefact exists, a test
-  covers it, and the board line is moved here — same discipline as runsheet
-  deletion. This convention is defined in `SCOPE.md` §Ledger and rides this
-  PR.
+  FL-ledger open/closed convention (rides this PR): FL backlog lines in
+  SCOPE.md are origin records and are never edited; live status lives on
+  this board. An FL item is open while its queue line exists here; the PR
+  that lands it deletes the queue line and writes the Done entry — same
+  discipline as runsheet deletion.
 - **E — commentary v5 + publish + scheme-master rebuild** — closed
   2026-07-30 on review acceptance; site commit `fc48f79`; 38/39 populated
   (120492 deterministic); scheme-master inception 100%/0 violations.
