@@ -153,7 +153,9 @@ def _write_index_parquet(tmp_path: Path) -> DataAccess:
         {
             "index_code": [_INDEX_CODE] * len(levels.data),
             "date": [d for d, _ in levels.data],
-            "level": [str(v) for _, v in levels.data],
+            "level": pa.array(
+                [v for _, v in levels.data], type=pa.decimal128(18, 6)
+            ),
         }
     )
     pq.write_table(table, tmp_path / "index_nav.parquet")
