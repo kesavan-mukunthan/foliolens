@@ -4,26 +4,24 @@ Authoritative working state between sessions. Updated by rider commits as
 items land. Newer than project memory; older than an open PR — when this
 file and an open PR disagree, the PR wins.
 
-_Last updated: 2026-08-02 (PR 55 merged)._
+_Last updated: 2026-08-02 (PR 56 merged)._
 
 ## In flight
 
-(none — next: FL-IO-1, queue item 1)
+(none — next: FL-ING-1, queue item 1)
 
 ## Queue (fire order; one slot per landed item)
 
-1. **FL-IO-1** — decimal128 assertion at read (`data_access.py`). Gates the
-   GCS move. Sonnet-cloud OK.
-2. **FL-ING-1** — incremental ingest keyed (code, date) + failed_codes
+1. **FL-ING-1** — incremental ingest keyed (code, date) + failed_codes
    split transient/permanent. Gates scheduled jobs. Opus. Spec:
    specs/spec-scale.md.
-3. **F-TER stages 1–2** — after stage-0 confirmation. Opus; backfill local.
-4. **FL-CAL-3** — sub-year returns point-to-point via the return engine. Opus.
-5. **FL-CAL-4** — calendar provenance in artifact + widened derivation base
+2. **F-TER stages 1–2** — after stage-0 confirmation. Opus; backfill local.
+3. **FL-CAL-3** — sub-year returns point-to-point via the return engine. Opus.
+4. **FL-CAL-4** — calendar provenance in artifact + widened derivation base
    for thin cohorts.
-6. **FL-ART-1** — `as_of` required in `build_metrics`; single-fund default
+5. **FL-ART-1** — `as_of` required in `build_metrics`; single-fund default
    moves to the caller.
-7. **FL-TOOL-1** — `[tool.ruff]` config + resulting cleanup. **Last, alone**
+6. **FL-TOOL-1** — `[tool.ruff]` config + resulting cleanup. **Last, alone**
    (repo-wide diff; conflicts with everything open).
 
 ## After F (agreed order)
@@ -63,6 +61,9 @@ any push; niftyindices stays local unless probed otherwise).
 
 ## Done
 
+- **FL-IO-1** — decimal128 guard at read — closed 2026-08-02, PR 56.
+  DecimalTypeError on non-decimal nav/level at first read; gates ING-1
+  rewrites and the GCS move.
 - **FL-DQ-2** — hole-month audit closed 2026-08-02. Artifact:
   `docs/audits/hole-months-2026-08.csv`. 3,711 hole-months across 228/7,913
   funds. All 228 upstream (fetch_side = 0). Step-5 spot-check (seed=42,
