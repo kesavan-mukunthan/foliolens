@@ -4,8 +4,7 @@ Authoritative working state between sessions. Updated by rider commits as
 items land. Newer than project memory; older than an open PR — when this
 file and an open PR disagree, the PR wins.
 
-_Last updated: 2026-08-02 (PR <n> merged)._
-(<n> = this PR's number once opened.)
+_Last updated: 2026-08-02 (PR 57 merged)._
 
 ## In flight
 
