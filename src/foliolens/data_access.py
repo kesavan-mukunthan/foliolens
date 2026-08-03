@@ -14,6 +14,7 @@ from typing import Any, cast
 
 import duckdb
 import pyarrow as pa
+import pyarrow.parquet as pq
 
 from .benchmark_map import (
     ALTERNATE,
@@ -39,6 +40,20 @@ def default_data_dir() -> Path | None:
     return Path(raw) if raw else None
 
 
+class DecimalTypeError(RuntimeError):
+    """A figure-of-record column is not stored as ``decimal128(18, 6)``.
+
+    Raised at first read, before any data scan, so silent float64
+    degradation (pandas rewrite, storage round-trip, a future writer bug)
+    becomes an immediate located crash rather than a downstream precision
+    finding.
+    """
+
+
+#: The one physical type figures of record are allowed to be stored as.
+_DECIMAL_TYPE = pa.decimal128(18, 6)
+
+
 class DataAccess:
     """Read NAV series from decimal128 parquet via DuckDB.
 
@@ -49,6 +64,40 @@ class DataAccess:
     def __init__(self, raw_root: Path | str) -> None:
         self._root = Path(raw_root)
         self._con: Any = duckdb.connect()
+        # Paths whose decimal128(18, 6) schema has already been verified this
+        # instance — construction happens before the files necessarily exist,
+        # so the check runs lazily on first read, not here.
+        self._decimal_verified: set[str] = set()
+
+    def _assert_decimal(self, path: str, column: str) -> None:
+        """Verify ``column`` in the parquet at ``path`` is ``decimal128(18, 6)``.
+
+        Schema-only (``pyarrow.parquet.read_schema``) — no data scan. Runs at
+        most once per file per instance; the result is memoised in
+        ``self._decimal_verified``.
+        """
+        if path in self._decimal_verified:
+            return
+
+        schema = pq.read_schema(path)  # type: ignore[no-untyped-call]
+        if column not in schema.names:
+            raise DecimalTypeError(
+                f"column {column!r} absent from {path}: "
+                f"expected decimal128(18, 6). "
+                "figures of record must remain decimal128; see "
+                "returns/convert.py for the single Decimal->float seam."
+            )
+
+        found_type = schema.field(column).type
+        if found_type != _DECIMAL_TYPE:
+            raise DecimalTypeError(
+                f"column {column!r} in {path} has type {found_type}, "
+                f"expected decimal128(18, 6). "
+                "figures of record must remain decimal128; see "
+                "returns/convert.py for the single Decimal->float seam."
+            )
+
+        self._decimal_verified.add(path)
 
     @property
     def _nav_path(self) -> str:
@@ -145,6 +194,7 @@ class DataAccess:
         arithmetic that would cast to DOUBLE.
         Raises ValueError if no data is found for amfi_code.
         """
+        self._assert_decimal(self._nav_path, "nav")
         rows: list[Any] = self._con.execute(
             "SELECT date, nav FROM read_parquet(?) WHERE amfi_code = ? ORDER BY date",
             [self._nav_path, amfi_code],
@@ -170,6 +220,7 @@ class DataAccess:
         would cast to DOUBLE.
         Raises ValueError if no data is found for index_code.
         """
+        self._assert_decimal(self._index_path, "level")
         rows: list[Any] = self._con.execute(
             "SELECT date, level FROM read_parquet(?) WHERE index_code = ? ORDER BY date",
             [self._index_path, index_code],
@@ -196,6 +247,7 @@ class DataAccess:
 
         amfi_codes=None reads all funds; a sequence reads only those codes.
         """
+        self._assert_decimal(self._nav_path, "nav")
         if amfi_codes is None:
             result = self._con.execute(
                 "SELECT amfi_code, date, nav FROM read_parquet(?) "
@@ -228,5 +280,6 @@ class DataAccess:
         seam) and delegates the derivation itself to
         :func:`foliolens.returns.calendar.derive_calendar`.
         """
+        self._assert_decimal(self._nav_path, "nav")
         panel = self.load_nav_panel(amfi_codes)
         return derive_calendar(panel, amfi_codes)
