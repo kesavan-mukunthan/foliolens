@@ -4,7 +4,8 @@ Authoritative working state between sessions. Updated by rider commits as
 items land. Newer than project memory; older than an open PR — when this
 file and an open PR disagree, the PR wins.
 
-_Last updated: 2026-08-02 (PR 56 merged)._
+_Last updated: 2026-08-02 (PR <n> merged)._
+(<n> = this PR's number once opened.)
 
 ## In flight
 
@@ -14,7 +15,8 @@ _Last updated: 2026-08-02 (PR 56 merged)._
 
 1. **FL-ING-1** — incremental ingest keyed (code, date) + failed_codes
    split transient/permanent. Gates scheduled jobs. Opus. Spec:
-   specs/spec-scale.md.
+   specs/spec-scale.md. Gated on NAVAll fixture capture (local
+   pre-step).
 2. **F-TER stages 1–2** — after stage-0 confirmation. Opus; backfill local.
 3. **FL-CAL-3** — sub-year returns point-to-point via the return engine. Opus.
 4. **FL-CAL-4** — calendar provenance in artifact + widened derivation base
@@ -27,7 +29,12 @@ _Last updated: 2026-08-02 (PR 56 merged)._
 ## After F (agreed order)
 
 Docs pass (full spec reconciliation) → multi-category (large-cap first;
-benchmark curation is the real per-category work; FL-DQ-2 gates debt) +
+benchmark curation is the real per-category work; FL-DQ-2 gates debt;
+equity diversified categories first, sectoral/thematic explicitly
+deferred — benchmark acquisition disproportionate to value; before
+expansion starts, decide validation tiering — full three-leg for
+flagship categories vs engine-inherited + spot rows elsewhere —
+deciding by drift is prohibited) +
 category landing page → GCS move (FL-IO-1 first; repoint the DataAccess
 seam; Drive stays cold copy) → scheduled jobs (Cloud Run Jobs + Scheduler;
 the publish job runs the full gate — identities + reconciliation — before
@@ -45,6 +52,9 @@ any push; niftyindices stays local unless probed otherwise).
 - Nothing rewrites the local parquet without a current backup; every merge
   is a human click (review-required protection).
 - Model split: runsheet-flavoured tasks Sonnet, design-surface tasks Opus.
+- Parallel PRs each carrying board riders will collide on this file:
+  merge one, rebase the other; resolution keeps both PRs' edits and
+  the later PR number in the last-updated line.
 - Runsheets in `docs/runsheets/` are pending instructions; each is deleted,
   and its board line moved to Done, by the PR that closes its item.
 
@@ -55,9 +65,13 @@ any push; niftyindices stays local unless probed otherwise).
   months, escalated disclosure past 6).
 - Fixture enrichment with 119718 at next re-freeze (FL-FIX-1).
 - Docs riders: inception-date contract paragraph rides F-TER stage 1.
-- Commentary v6: prompt rule — no aggregated percentile claims unless every
-  covered figure matches (149450 finding); optional 149450 re-roll rides
-  any local sitting.
+- Commentary v6 (drafted, land before the next batch sitting): prompt
+  rule — no aggregated percentile claims unless every covered figure
+  matches (149450 finding); staleness key in runner.py becomes
+  (model, prompt_version); version bump marks all published
+  commentaries stale, so the next batch regenerates everything — the
+  149450 re-roll is thereby moot. Prerequisite for llmclient
+  integration.
 
 ## Done
 
