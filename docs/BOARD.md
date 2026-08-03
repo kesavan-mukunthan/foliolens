@@ -4,7 +4,7 @@ Authoritative working state between sessions. Updated by rider commits as
 items land. Newer than project memory; older than an open PR — when this
 file and an open PR disagree, the PR wins.
 
-_Last updated: 2026-08-02 (PR 54 merged)._
+_Last updated: 2026-08-02 (PR 55 merged)._
 
 ## In flight
 
@@ -15,7 +15,8 @@ _Last updated: 2026-08-02 (PR 54 merged)._
 1. **FL-IO-1** — decimal128 assertion at read (`data_access.py`). Gates the
    GCS move. Sonnet-cloud OK.
 2. **FL-ING-1** — incremental ingest keyed (code, date) + failed_codes
-   split transient/permanent. Gates scheduled jobs. Opus.
+   split transient/permanent. Gates scheduled jobs. Opus. Spec:
+   specs/spec-scale.md.
 3. **F-TER stages 1–2** — after stage-0 confirmation. Opus; backfill local.
 4. **FL-CAL-3** — sub-year returns point-to-point via the return engine. Opus.
 5. **FL-CAL-4** — calendar provenance in artifact + widened derivation base
