@@ -6,7 +6,7 @@ Return and risk analytics for Indian mutual funds, written in Python. Every conv
 
 ### Funds covered
 
-- The committed test fixture (`fixtures/funds.csv`, `fixtures/nav_snapshots/nav.parquet`) holds daily NAV history for 13 share classes of 11 funds: large cap, mid cap, small cap, flexi cap, short duration debt, liquid, multi-asset, fund of funds and gold fund of funds.
+- The committed test fixture (`fixtures/funds.csv`, `fixtures/nav_snapshots/nav.parquet`) holds daily NAV history for 13 share classes of 10 funds: large cap, mid cap, small cap, flexi cap, short duration debt, liquid, multi-asset, fund of funds and gold fund of funds.
 - The fund page pipeline covers the flexi-cap category, direct plan, growth option.
 
 ### Returns (figures of record)
@@ -49,7 +49,7 @@ Own-vs-oracle tests run on frozen synthetic fixture series at a relative toleran
 
 ## Design
 
-Anything investable is an `Investment` with a return series: a fund, a benchmark, or a portfolio. More in [`ARCHITECTURE.md`](ARCHITECTURE.md); build order in [`SCOPE.md`](SCOPE.md).
+Anything investable is an `Investment` with a return series. Fund share classes and benchmarks are implemented; `Portfolio` and `Stock` are stubs. More in [`ARCHITECTURE.md`](ARCHITECTURE.md); build order in [`SCOPE.md`](SCOPE.md).
 
 ## Built on
 
