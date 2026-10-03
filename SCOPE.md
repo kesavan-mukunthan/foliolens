@@ -27,11 +27,9 @@ Four questions the system answers:
 
 - **Project (Claude.ai) = decisions and specs.** Strategic reasoning, design, sequencing, financial method, review of output. A session ends in a committed spec or a recorded decision.
 - **Claude Code = construction.** Implementation against a spec, running, testing, committing.
-- **Default executor: Claude Code on Sonnet 4.6.** Haiku-safe for mechanical sub-steps (fetch, land, report); Sonnet for convention-sensitive logic (resampling, return math, reconciliation).
 - **Bridge artifacts in the repo:** `CLAUDE.md` (standing conventions + invariants), `SCOPE.md` (this brief — **owns build order**), `specs/spec-*.md` (capability-named handoffs with acceptance criteria; **no sequence in the filename**), `tests/` (invariants as tests; the acceptance gate).
 - **Every step gates on a green test suite.** Standing correctness laws live in `CLAUDE.md` and are enforced as tests in `tests/invariants/`; step specs add fixture-bound acceptance in `tests/step-NN/`. "Honour the convention" is not the gate — a green test is.
 - **Per-step rhythm:** design here → spec committed → build in Claude Code → review here → update brief if a decision changed.
-- **Mobile = design/review here; desktop = Claude Code execution.** For curriculum-aligned steps (RAG, LangGraph, MCP, evals), Claude Code scaffolds and reviews rather than autocompletes, to preserve learning.
 
 ## Build Order
 
@@ -57,7 +55,7 @@ Specs come in two axes. **Capability specs** = what the product can do. **Platfo
 
 **Data-acquisition track (promoted to active, kickoff scheduled):** runs unattended alongside the build so time-sensitive data accumulates. In priority order: (1) bhavcopy daily backfill — prices, traded value, delivery % (UDiFF format post Jul-2024; handle the format break); (2) holdings forward-append job + AMFI historical-depth probe; (3) security master (NSDL + NSE symbol-ISIN map); (4) benchmark sourcing — Nifty 500 TRI and BSE 500 TRI series + constituent lists (flexicap Tier-1 benchmarks split between the two by AMC; free-float *weights* are licensed — see Open Questions); (5) promoter-group taxonomy + manager-tenure reference tables (seeded from shareholding-pattern disclosures; manual-heavy, trails the jobs). Immediate milestone this track serves: a fund-dossier PDF over the flexi-cap category (positioning profile, concentration/ENB, DTL, family roll-up, NAV battery) — capture is universe-wide, analytics scoped to flexi cap first.
 
-Working state between sessions lives in `docs/BOARD.md`.
+Working state between sessions is kept outside this repository.
 
 **Data-quality backlog (from published reconciliation):**
 - **FL-DQ-1** — fund `103340` carries pre-Nov-2009 NAV history belonging to a different scheme/plan (a +900% single-session discontinuity 2009-10-30→2009-11-02), which corrupts its since-inception return (the shorter trailing windows are clean). Truncate or re-source the pre-2009-11 history, and audit the full universe for single-step NAV jumps at ingestion time when the backfill is rebuilt. Guarded now by `tests/validation/test_nav_quality.py` (no single-step move > 50%), `xfail(strict=True)` on `103340` so the guard flips loudly the day the data is fixed; carried in the meantime as a reconciliation exemption (`fixtures/reconciliation_exemptions.csv`).
@@ -186,7 +184,6 @@ None of the following come from mftool/AMFI:
 **Resolved**
 - CAS parser structure → casparser. Step-2 minimum metrics → returns first, then Sharpe/drawdown/vol. DuckDB schema → Fund/ShareClass + NavPoint/Transaction/Lot/Position/materialised metrics on parquet-GCS.
 - **Step-0 task breakdown → spec-00** (CAS / step-1 split out separately).
-- **Execution model** → Claude Code on Sonnet 4.6; Haiku for mechanical sub-steps.
 - **Test layer** → added as a bridge artifact; standing invariants as tests, every step gates on green.
 - **Step-0 storage** → local parquet + decimal128; GCS at step 4 via the `DataAccess` seam.
 - **Day-count** → actual_days / 365 (AMFI).
